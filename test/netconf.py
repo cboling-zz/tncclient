@@ -309,6 +309,7 @@ pp(full_config)
 # Namespaces
 
 onf_ns = {'of-config': 'urn:onf:config:yang'}
+with_def_ns = {'with-defaults': 'urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults'}
 
 # ID
 
@@ -327,3 +328,14 @@ _ = xml_.sub_ele(switch_filter, 'resources')
 
 resource_data = mgr.get_config(source, filter=resource_filter)
 pp(resource_data)
+#
+# # Everything      (Not supported?)
+#
+# if ':with-defaults' in mgr.server_capabilities:
+# with_defaults = xml_.new_ele('with-defaults', nsmap=with_def_ns)
+# with_defaults.text = 'explicit'
+# everything = mgr.get_config(source, filter=with_defaults)
+# pp(everything)
+#
+# # http://programtalk.com/python-examples/ncclient.xml_.new_ele/
+#
