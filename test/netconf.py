@@ -25,6 +25,11 @@ xpath_to_hello = "adtran-hello:hello"
 
 # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.452.8737&rep=rep1&type=pdf
 
+# https://trac.ietf.org/trac/edu/raw-attachment/wiki/IETF94/94-module-3-netconf.pdf
+
+# https://github.com/ksator/python-training-for-network-engineers/blob/master/rpc-netconf-lxml-ncclient/ncclient.md
+
+
 # TODO: Look into   yang tools netconf_utils for netconf code generation
 
 
@@ -276,3 +281,49 @@ if __name__ == '__main__':
 #  'urn:ietf:params:xml:ns:yang:ietf-system?module=ietf-system&revision=2014-08-06&features=radius,authentication,local-users,radius-authentication,ntp,ntp-udp-port,timezone-name,dns-udp-tcp-port': [],
 #  'urn:ietf:params:xml:ns:yang:ietf-x509-cert-to-name?module=ietf-x509-cert-to-name&revision=2013-03-26': [],
 #  'urn:ietf:params:xml:ns:yang:ietf-yang-types?module=ietf-yang-types&revision=2013-07-15': []}
+
+
+
+
+
+
+
+
+import pprint
+from ncclient import manager, xml_, capabilities
+from lxml import etree
+
+def pp(value): pprint.PrettyPrinter(indent=2).pprint(value)
+
+ip = '192.168.0.22'
+username = 'mininet'
+password = 'mininet'
+mgr = manager.connect(host=ip,port=830,username=username,password=password, allow_agent=False,look_for_keys=False, hostkey_verify=False)
+mgr.connected
+
+source = 'running'
+
+full_config = mgr.get_config(source)
+pp(full_config)
+
+# Namespaces
+
+onf_ns = {'of-config': 'urn:onf:config:yang'}
+
+# ID
+
+id_filter = xml_.new_ele('filter')
+switch_filter = xml_.sub_ele(id_filter, 'capable-switch', nsmap=onf_ns)
+_ = xml_.sub_ele(switch_filter, 'id')
+
+ident_data = mgr.get_config(source, filter=id_filter)
+pp(ident_data)
+
+# Resources
+
+resource_filter = xml_.new_ele('filter')
+switch_filter = xml_.sub_ele(resource_filter, 'capable-switch', nsmap=onf_ns)
+_ = xml_.sub_ele(switch_filter, 'resources')
+
+resource_data = mgr.get_config(source, filter=resource_filter)
+pp(resource_data)
