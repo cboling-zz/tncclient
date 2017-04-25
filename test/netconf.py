@@ -206,8 +206,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='NETCONF Test App')
     parser.add_argument('--ip_address', '-i', action='store', default=None, help='IP Address of NETCONF server')
-    parser.add_argument('--username', '-u', action='store', default='hsvroot', help='Username')
-    parser.add_argument('--password', '-p', action='store', default='BOSCO', help='Password')
+    parser.add_argument('--username', '-u', action='store', default='mininet', help='Username')
+    parser.add_argument('--password', '-p', action='store', default='mininet', help='Password')
     parser.add_argument('--port', '-P', action='store', default=830, help='TCP Port')
     parser.add_argument('--async', '-a', action='store_true', help='Do all operations asynchronously')
 
