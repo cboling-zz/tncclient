@@ -3,6 +3,7 @@
 
 import pprint
 import argparse
+import os
 from ncclient import manager, xml_, capabilities
 from lxml import etree
 from twisted.internet import reactor, defer
@@ -18,55 +19,119 @@ allNamespaces = {
     "adtn-subsystem-traces": "http://www.adtran.com/ns/yang/adtran-subsystem-traces",
     "adtn-hello": "http://www.adtran.com/ns/yang/adtran-hello",
 }
-xpath_to_hello = "adtran-hello:hello"
+onf_ns = {'of-config': 'urn:onf:config:yang'}
 
 # For an evc, look at
 #   http://confluence.adtran.com/display/AgileDev/OSA+L2+KB+-+Netconf+Testing+Examples
-
 # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.452.8737&rep=rep1&type=pdf
-
 # https://trac.ietf.org/trac/edu/raw-attachment/wiki/IETF94/94-module-3-netconf.pdf
-
 # https://github.com/ksator/python-training-for-network-engineers/blob/master/rpc-netconf-lxml-ncclient/ncclient.md
-
-
 # TODO: Look into   yang tools netconf_utils for netconf code generation
 
 
+def pp(value):
+    pprint.PrettyPrinter(indent=2).pprint(value)
+
+
+def elem2dict(node):
+    """
+    Convert an lxml.etree node tree into a dict.
+    """
+    d = {}
+    for e in node.iterchildren():
+        key = e.tag.split('}')[1] if '}' in e.tag else e.tag
+        value = e.text if e.text else elem2dict(e)
+        d[key] = value
+    return d
+
+
+def etree_to_dict(t, discard_ns=False):
+    d = {t.tag: map(etree_to_dict, t.iterchildren())}
+    d.update(('@' + k, v) for k, v in t.attrib.iteritems())
+    d['text'] = t.text
+    return d
+
+
+def recursive_dict(element):
+    return element.tag, \
+           dict(map(recursive_dict, element)) or element.text
+
+
 class Main(object):
-    def __init__(self, ip_address, username, password, port=830, is_async=False, is_twisted=False):
+    def __init__(self, ip_address, username, password, port=830, is_async=False):
         self.ip_address = ip_address
         self.port = port
         self.username = username
         self.password = password
         self.is_async = is_async
-        self.is_twisted = is_twisted
         self.manager = None
         self.capabilities = None
 
     def __str__(self):
         return "netconf {}@{}".format(self.username, self.ip_address)
 
-    def start(self):
-        #
+    def connect(self):
         # o To disable attempting publickey authentication altogether, call with
         #   allow_agent and look_for_keys as False.
         #
         # o hostkey_verify enables hostkey verification from ~/.ssh/known_hosts
 
-        self.manager = manager.connect(host=self.ip_address,
-                                       port=self.port,
-                                       username=self.username,
-                                       password=self.password,
-                                       allow_agent=False,
-                                       look_for_keys=False,
-                                       hostkey_verify=False)
+        connection = manager.connect(host=self.ip_address,
+                                     port=self.port,
+                                     username=self.username,
+                                     password=self.password,
+                                     allow_agent=False,
+                                     look_for_keys=False,
+                                     hostkey_verify=False)
+        if self.is_async:
+            connection.async_mode = True
 
-    @staticmethod
-    def hello_msg():
-        pass
+        return connection
 
-    def get_config(self, source='running'):
+    def start(self):
+        ##########################################################################
+        # Connect to the NETCONF Server and exchange capabilities
+
+        connection = self.connect()
+        self.manager = connection
+        assert self.manager.connected
+
+        print(os.linesep + '=================================================')
+        print('Full device config follows:')
+        full = self.get_full_config()
+        pp(full)
+
+        # full_dict = elem2dict(full.data_ele)
+        # full_dict = etree_to_dict(full.data_ele)
+        # full_dict = recursive_dict(full.data_ele)
+        # pp(full_dict)
+
+        print(os.linesep + '=================================================')
+        print('ID Informaiton follows:')
+        xml, ident = self.get_id()
+        pp(xml)
+        print('  ID id: {}'.format(ident))
+
+    def wait_for_response(self, request):
+        # If not asynchronous, request is an RpcReply object
+        # If async, request is an operations object
+        if not self.is_async:
+            return request
+
+        def check(op):
+            from ncclient import NCClientError
+
+            if op.error is not None:    # e.g. transport layer error
+                return op.error
+            elif not op.reply.ok:       # <rpc-error>(s) present
+                return op.reply.error
+
+        request.event.wait(self.manager.timeout)
+        error = check(request)
+
+        return request.reply
+
+    def get_full_config(self, source='running'):
         """
         Get the configuration from the specified source
         
@@ -103,28 +168,21 @@ class Main(object):
               </logical-switches>
             </capable-switch>
           </data>
-        </rpc-reply>
-
-         
+        </rpc-reply>         
         """
-        return self.manager.get_config(source)
+        request = self.manager.get_config(source)
 
-    # root_filter=xml_.new_ele('filter')
-    # >>> resource_filter=xml_.sub_ele(root_filter, 'resources')
-    # >>> id_filter=xml_.sub_ele(root_filter, 'id')
-    # >>>
-    # >>> mgr.get_config('running', filter=root_filter)
-    # <?xml version="1.0" encoding="UTF-8"?>
-    # <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="urn:uuid:f8919ae5-cd1d-4c5b-8107-0673abd75c46">
-    #   <data/>
-    # </rpc-reply>
-    #
-    # results = mgr.get_config('running')
-    # r_etree = etree.fromstring(results.data_xml)   # Element {urn:ietf:params:xml:ns:netconf:base:1.0}data
-    #
-    # type(results.data_ele)
-    #   <type 'lxml.etree._Element'>
+        return self.wait_for_response(request)
 
+    def get_id(self, source='running'):
+        id_filter = xml_.new_ele('filter')
+        switch_filter = xml_.sub_ele(id_filter, 'capable-switch', nsmap=onf_ns)
+        _ = xml_.sub_ele(switch_filter, 'id')
+
+        request = self.manager.get_config(source, filter=id_filter)
+        response = self.wait_for_response(request)
+
+        return response, response.data_ele[0][0].text
 
     @property
     def caps(self):
@@ -144,8 +202,6 @@ class Main(object):
             return results
 
 
-
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='NETCONF Test App')
@@ -153,8 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--username', '-u', action='store', default='hsvroot', help='Username')
     parser.add_argument('--password', '-p', action='store', default='BOSCO', help='Password')
     parser.add_argument('--port', '-P', action='store', default=830, help='TCP Port')
-    parser.add_argument('--async', '-a', action='store_true', help='Do all operations asynchronously (but not twisted)')
-    parser.add_argument('--twisted', '-t', action='store_true', help='Use twisted reactor')
+    parser.add_argument('--async', '-a', action='store_true', help='Do all operations asynchronously')
 
     args = parser.parse_args()
 
@@ -162,8 +217,7 @@ if __name__ == '__main__':
          port=args.port,
          username=args.username,
          password=args.password,
-         is_async=args.async,
-         twisted=args.twisted).start()
+         is_async=args.async).start()
 
 #  'http://www.adtran.com/ns/yang/adtran-hello?module=adtran-hello&revision=2015-07-20': [],
 
@@ -282,60 +336,44 @@ if __name__ == '__main__':
 #  'urn:ietf:params:xml:ns:yang:ietf-x509-cert-to-name?module=ietf-x509-cert-to-name&revision=2013-03-26': [],
 #  'urn:ietf:params:xml:ns:yang:ietf-yang-types?module=ietf-yang-types&revision=2013-07-15': []}
 
-
-
-
-
-
-
-
-import pprint
-from ncclient import manager, xml_, capabilities
-from lxml import etree
-
-def pp(value): pprint.PrettyPrinter(indent=2).pprint(value)
-
-ip = '192.168.0.22'
-username = 'mininet'
-password = 'mininet'
-mgr = manager.connect(host=ip,port=830,username=username,password=password, allow_agent=False,look_for_keys=False, hostkey_verify=False)
-mgr.connected
-
-source = 'running'
-
-full_config = mgr.get_config(source)
-pp(full_config)
-
-# Namespaces
-
-onf_ns = {'of-config': 'urn:onf:config:yang'}
-with_def_ns = {'with-defaults': 'urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults'}
-
-# ID
-
-id_filter = xml_.new_ele('filter')
-switch_filter = xml_.sub_ele(id_filter, 'capable-switch', nsmap=onf_ns)
-_ = xml_.sub_ele(switch_filter, 'id')
-
-ident_data = mgr.get_config(source, filter=id_filter)
-pp(ident_data)
-
-# Resources
-
-resource_filter = xml_.new_ele('filter')
-switch_filter = xml_.sub_ele(resource_filter, 'capable-switch', nsmap=onf_ns)
-_ = xml_.sub_ele(switch_filter, 'resources')
-
-resource_data = mgr.get_config(source, filter=resource_filter)
-pp(resource_data)
 #
-# # Everything      (Not supported?)
+# import pprint
+# from ncclient import manager, xml_, capabilities
+# from lxml import etree
+# def dummy():
+# def pp(value): pprint.PrettyPrinter(indent=2).pprint(value)
 #
-# if ':with-defaults' in mgr.server_capabilities:
-# with_defaults = xml_.new_ele('with-defaults', nsmap=with_def_ns)
-# with_defaults.text = 'explicit'
-# everything = mgr.get_config(source, filter=with_defaults)
-# pp(everything)
+# ip = '192.168.0.22'
+# ip = '172.22.12.241'
+# username = 'mininet'
+# password = 'mininet'
+# mgr = manager.connect(host=ip,port=830,username=username,password=password, allow_agent=False,look_for_keys=False, hostkey_verify=False)
+# mgr.connected
 #
-# # http://programtalk.com/python-examples/ncclient.xml_.new_ele/
+# source = 'running'
 #
+# full_config = mgr.get_config(source)
+# pp(full_config)
+#
+# # Namespaces
+#
+# onf_ns = {'of-config': 'urn:onf:config:yang'}
+# with_def_ns = {'with-defaults': 'urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults'}
+#
+# # ID
+#
+# id_filter = xml_.new_ele('filter')
+# switch_filter = xml_.sub_ele(id_filter, 'capable-switch', nsmap=onf_ns)
+# _ = xml_.sub_ele(switch_filter, 'id')
+#
+# ident_data = mgr.get_config(source, filter=id_filter)
+# pp(ident_data)
+#
+# # Resources
+#
+# resource_filter = xml_.new_ele('filter')
+# switch_filter = xml_.sub_ele(resource_filter, 'capable-switch', nsmap=onf_ns)
+# _ = xml_.sub_ele(switch_filter, 'resources')
+#
+# resource_data = mgr.get_config(source, filter=resource_filter)
+# pp(resource_data)
