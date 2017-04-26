@@ -2,40 +2,34 @@
 # Quick and dirty twisted conch test program to help with finding the best way
 # to peel this onion
 
-import pprint
 import argparse
+import getpass
+import os
+import pprint
+import struct
+import sys
+
+from twisted.conch.endpoints import SSHCommandClientEndpoint
+from twisted.conch.ssh import common, keys
+from twisted.conch.ssh.channel import SSHChannel
+from twisted.conch.ssh.connection import SSHConnection
+from twisted.conch.ssh.keys import Key
+from twisted.conch.ssh.transport import SSHClientTransport
+from twisted.conch.ssh.userauth import SSHUserAuthClient
+from twisted.internet import defer, protocol, reactor
+from twisted.internet import task
+from twisted.internet.protocol import connectionDone
+from twisted.python import log
 # import os
 # from ncclient import manager, xml_, capabilities
 # from lxml import etree
-from twisted.internet import reactor, defer, task
-from twisted.python.filepath import FilePath
-from twisted.python.usage import Options
-from twisted.internet.defer import Deferred
-from twisted.internet.protocol import Factory, Protocol
-from twisted.internet.endpoints import UNIXClientEndpoint
-from twisted.conch.ssh.keys import EncryptedKeyError, Key
-from twisted.conch.client.knownhosts import KnownHostsFile
-from twisted.conch.endpoints import SSHCommandClientEndpoint
-from twisted.conch.ssh import transport, userauth, connection, common, keys, channel
+from twisted.python._oldstyle import _oldStyle
 
-from twisted.conch.ssh import transport, userauth, connection, common, keys, channel
-from twisted.internet import defer, protocol, reactor
-from twisted.python import log
-import struct, sys, getpass, os
-
-# Replace this with your username.
-# Default username and password will match the sshsimpleserver.py
-USER = 'mininet'
-HOST = '172.22.12.241'
-# PORT = 5022
-PORT = 22
-# SERVER_FINGERPRINT = 'pu:t:se:rv:er:fi:ng:er:pr:in:t:he:re'
 SERVER_FINGERPRINT = '6e:b6:48:0b:55:c4:ef:76:5b:a3:95:29:2a:c5:81:27'
 
-# Path to RSA SSH keys accepted by the server.
-CLIENT_RSA_PUBLIC = 'ssh-keys/client_rsa.pub'
 # Set CLIENT_RSA_PUBLIC to empty to not use SSH key auth.
-# CLIENT_RSA_PUBLIC = ''
+# CLIENT_RSA_PUBLIC = 'ssh-keys/client_rsa.pub'  # Path to RSA SSH keys accepted by the server.
+CLIENT_RSA_PUBLIC = ''
 CLIENT_RSA_PRIVATE = 'ssh-keys/client_rsa'
 
 
@@ -43,19 +37,20 @@ def pp(value):
     pprint.PrettyPrinter(indent=2).pprint(value)
 
 
-class NetconfTransport(object, transport.SSHClientTransport):
+class NetconfTransport(object, SSHClientTransport):
     """
     NetconfTransport implements the client side of the NETCONF SSH protocol.
 
     This class must, at a minimum, implement the verifyHostKey() and the
     connectionSecure() methods of transport.SSHClientTransport.
     """
-    def __init__(self, expectedFingerPrint=None):
+
+    def __init__(self, username, password=None, expected_finger_print=None):
         """
         Initialize our transport
         
-        :param expectedFingerPrint: (str) if not NONE, we expect the server SSH fingerprint to match
-                                          ie) '6e:b6:48:0b:55:c4:ef:76:5b:a3:95:29:2a:c5:81:27'
+        :param expected_finger_print: (str) if not NONE, we expect the server SSH fingerprint to match
+                                            ie) '6e:b6:48:0b:55:c4:ef:76:5b:a3:95:29:2a:c5:81:27'
         """
         try:
             super(NetconfTransport, self).__init__()
@@ -65,7 +60,13 @@ class NetconfTransport(object, transport.SSHClientTransport):
             # an __init__ function
             pass
 
-        self._peer_expected_fingerprint = expectedFingerPrint            # Expected
+        except Exception as e:
+            log.msg(e)
+            raise
+
+        self._username = username
+        self._password = password
+        self._peer_expected_fingerprint = expected_finger_print  # Expected
         self._peer_fingerprint = {'hostKey': None, 'fingerprint': None}  # Actual
 
     def verifyHostKey(self, hostKey, fingerprint):
@@ -104,9 +105,18 @@ class NetconfTransport(object, transport.SSHClientTransport):
         """
         log.msg('connectionSecure: entry')
 
-        self.requestService(SimpleUserAuth(USER, SimpleConnection()))
+        if self.transport.addressFamily == 2:
+            host = self.transport.addr[0]
+        else:
+            raise NotImplementedError('TODO: Currently do not support address type {}'.
+                                      format(self.transport.addressFamily))
 
-    def connectionLost(self, reason):
+        self.requestService(SimpleUserAuth(user=self._username,
+                                           password=self._password,
+                                           host=host,
+                                           instance=SimpleConnection()))
+
+    def connectionLost(self, reason=connectionDone):
         """
         When the underlying connection is closed, stop the running service (if
         any), and log out the avatar (if any).
@@ -141,11 +151,45 @@ class NetconfTransport(object, transport.SSHClientTransport):
     # def dataReceived(self, data):
 
 
-class SimpleUserAuth(userauth.SSHUserAuthClient):
+@_oldStyle
+class SimpleUserAuth(SSHUserAuthClient):
+    """
+    A service implementing the client side of 'ssh-userauth'.
+
+    This service will try all authentication methods provided by the server,
+    making callbacks for more information when necessary.
+    """
+
+    def __init__(self, user, instance, host=None, password=None):
+        self._host = host
+        self._password = password
+
+        SSHUserAuthClient.__init__(self, user, instance)
+
     def getPassword(self):
-        return defer.succeed(getpass.getpass("%s@%s's password: " % (USER, HOST)))
+        """
+        Return a L{Deferred} that will be called back with a password.
+        prompt is a string to display for the password, or None for a generic
+        'user@hostname's password: '.
+
+        @type prompt: L{bytes}/L{None}
+        @rtype: L{defer.Deferred}
+        """
+        if self._password is None:
+            self._password = getpass.getpass("%s@%s's password: " % (self.user, self._host))
+
+        return defer.succeed(self._password)
 
     def getGenericAnswers(self, name, instruction, questions):
+        """
+        Returns a L{Deferred} with the responses to the promopts.
+
+        @param name: The name of the authentication currently in progress.
+        @param instruction: Describes what the authentication wants.
+        @param prompts: A list of (prompt, echo) pairs, where prompt is a
+        string to display and echo is a boolean indicating whether the
+        user's response should be echoed as they type it.
+        """
         print(name)
         print(instruction)
         answers = []
@@ -158,6 +202,15 @@ class SimpleUserAuth(userauth.SSHUserAuthClient):
         return defer.succeed(answers)
 
     def getPublicKey(self):
+        """
+        Return a public key for the user.  If no more public keys are
+        available, return L{None}.
+
+        This implementation always returns L{None}.  Override it in a
+        subclass to actually find and return a public key object.
+
+        @rtype: L{Key} or L{None}
+        """
         if (
             not CLIENT_RSA_PUBLIC or
             not os.path.exists(CLIENT_RSA_PUBLIC) or
@@ -169,20 +222,45 @@ class SimpleUserAuth(userauth.SSHUserAuthClient):
 
     def getPrivateKey(self):
         """
-        A deferred can also be returned.
+        Return a L{Deferred} that will be called back with the private key
+        object corresponding to the last public key from getPublicKey().
+        If the private key is not available, errback on the Deferred.
+
+        @rtype: L{Deferred} called back with L{Key}
         """
         return defer.succeed(keys.Key.fromFile(CLIENT_RSA_PRIVATE))
 
+        # TODO Other base class methods include
 
-class SimpleConnection(connection.SSHConnection):
+
+class SimpleConnection(SSHConnection):
     def serviceStarted(self):
+        """
+        called when the service is active on the transport.
+        """
+        # Open a new channel on this connection.
         self.openChannel(TrueChannel(2**16, 2**15, self))
         self.openChannel(FalseChannel(2**16, 2**15, self))
         self.openChannel(CatChannel(2**16, 2**15, self))
 
+        # TODO Other SSHConnection base class methods include
+        # def serviceStopped(self):
+        # def packetReceived(self, messageNum, packet):
+        # def sendGlobalRequest(self, request, data, wantReply=0):
+        # def openChannel(self, channel, extra=b''):
+        # def sendRequest(self, channel, requestType, data, wantReply=0):
+        # def adjustWindow(self, channel, bytesToAdd):
+        # def sendData(self, channel, data):
+        # def sendExtendedData(self, channel, dataType, data):
+        # def sendEOF(self, channel):
+        # def sendClose(self, channel):
+        # def getChannel(self, channelType, windowSize, maxPacket, data):
+        # def gotGlobalRequest(self, requestType, data):
+        # def channelClosed(self, channel):
 
-class TrueChannel(channel.SSHChannel):
-    name = 'session' # needed for commands
+
+class TrueChannel(SSHChannel):
+    name = 'session'  # needed for commands
 
     def openFailed(self, reason):
         print('true failed', reason)
@@ -196,7 +274,7 @@ class TrueChannel(channel.SSHChannel):
         self.loseConnection()
 
 
-class FalseChannel(channel.SSHChannel):
+class FalseChannel(SSHChannel):
     name = 'session'
 
     def openFailed(self, reason):
@@ -211,13 +289,32 @@ class FalseChannel(channel.SSHChannel):
         self.loseConnection()
 
 
-class CatChannel(channel.SSHChannel):
+class CatChannel(SSHChannel):
+    """
+    A class that represents a multiplexed channel over an SSH connection.
+    The channel has a local window which is the maximum amount of data it will
+    receive, and a remote which is the maximum amount of data the remote side
+    will accept.  There is also a maximum packet size for any individual data
+    packet going each way.
+    """
     name = 'session'
 
     def openFailed(self, reason):
+        """
+        Called when the open failed for some reason.
+        reason.desc is a string descrption, reason.code the SSH error code.
+
+        @type reason: L{error.ConchError}
+        """
         print('echo failed', reason)
 
     def channelOpen(self, ignoredData):
+        """
+        Called when the channel is opened.  specificData is any data that the
+        other side sent us when opening the channel.
+
+        @type specificData: L{bytes}
+        """
         self.data = ''
         d = self.conn.sendRequest(self, 'exec', common.NS('cat'), wantReply = 1)
         d.addCallback(self._cbRequest)
@@ -227,17 +324,40 @@ class CatChannel(channel.SSHChannel):
         self.conn.sendEOF(self)
 
     def dataReceived(self, data):
+        """
+        Called when we receive data.
+
+        @type data: L{bytes}
+        """
         self.data += data
 
     def closed(self):
+        """
+        Called when the channel is closed.  This means that both our side and
+        the remote side have closed the channel.
+        """
         print('got data from cat: %s' % repr(self.data))
         self.loseConnection()
         reactor.stop()
 
+        # TODO Other SSHChannel methods include
+        # def requestReceived(self, requestType, data):
+        # def eofReceived(self):
+        # def extReceived(self, dataType, data):
+        # def closeReceived(self):
+        # def write(self, data):
+        # def writeExtended(self, dataType, data):
+        # def writeSequence(self, data):
+        # def loseConnection(self):
+        # def stopWriting(self):
+        # def startWriting(self):
+
 
 def ssh_test(args):
     client = protocol.ClientCreator(reactor,
-                                    NetconfTransport
+                                    NetconfTransport,
+                                    username=args.username,
+                                    password=args.password
                                     # , expectedFingerPrint=SERVER_FINGERPRINT
                                     )
 
@@ -269,7 +389,7 @@ def main(args, ip_address, port, username, password):
     reactor.callLater(0, hello_world)
 
     # In case we hang....
-    reactor.callLater(600, reactor.stop)
+    # reactor.callLater(60, reactor.stop)
 
     # Run the SSH 'ls' command 1 second from now and set up
     # shutdown on success or an error
