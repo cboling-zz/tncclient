@@ -22,10 +22,10 @@ try:
     from Queue import Queue, Empty
 except ImportError:
     from queue import Queue, Empty
-from ncclient.xml_ import *
-from ncclient.capabilities import Capabilities
-from ncclient.transport.errors import TransportError, SessionError
-from ncclient.transport.notify import Notification
+from tncclient.xml_ import *
+from tncclient.capabilities import Capabilities
+from tncclient.transport.errors import TransportError, SessionError
+from tncclient.transport.notify import Notification
 
 logger = logging.getLogger('ncclient.transport.session')
 

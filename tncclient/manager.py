@@ -18,13 +18,15 @@ This module is a thin layer of abstraction around the library.
 It exposes all core functionality.
 """
 
-from ncclient import capabilities
-from ncclient import operations
-from ncclient import transport
+from tncclient import capabilities
+from tncclient import operations
+from tncclient import transport
+from tncclient.operations import SyncMode
+
 import six
 import logging
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
 logger = logging.getLogger('ncclient.manager')
 
@@ -202,7 +204,8 @@ class Manager(six.with_metaclass(OpExecutor, object)):
 
     def __init__(self, session, device_handler, timeout=30, *args, **kwargs):
         self._session = session
-        self._async_mode = False
+        self._sync_mode = SyncMode.SYNCHRONOUS if not kwargs.get('twisted-mode', False) else\
+            SyncMode.ASYNCHRONOUS_TWISTED
         self._timeout = timeout
         self._raise_mode = operations.RaiseMode.ALL
         self._device_handler = device_handler
@@ -218,7 +221,11 @@ class Manager(six.with_metaclass(OpExecutor, object)):
         self._timeout = timeout
 
     def __set_async_mode(self, mode):
-        self._async_mode = mode
+        self.__set_sync_mode(SyncMode.ASYNCHRONOUS_THREADED if mode else SyncMode.SYNCHRONOUS)
+
+    def __set_sync_mode(self, mode):
+        assert mode != SyncMode.ASYNCHRONOUS_TWISTED    # Cannot change once it is set
+        self._sync_mode = mode
 
     def __set_raise_mode(self, mode):
         assert(mode in (operations.RaiseMode.NONE, operations.RaiseMode.ERRORS, operations.RaiseMode.ALL))
@@ -227,7 +234,7 @@ class Manager(six.with_metaclass(OpExecutor, object)):
     def execute(self, cls, *args, **kwds):
         return cls(self._session,
                    device_handler=self._device_handler,
-                   async=self._async_mode,
+                   sync_mode=self._sync_mode,
                    timeout=self._timeout,
                    raise_mode=self._raise_mode).request(*args, **kwds)
 
@@ -314,8 +321,7 @@ class Manager(six.with_metaclass(OpExecutor, object)):
         """Whether currently connected to the NETCONF server."""
         return self._session.connected
 
-    async_mode = property(fget=lambda self: self._async_mode,
-                          fset=__set_async_mode)
+    async_mode = property(fget=lambda self: self._sync_mode, fset=__set_async_mode)
     """Specify whether operations are executed asynchronously (`True`) or
     synchronously (`False`) (the default)."""
 
@@ -328,3 +334,6 @@ class Manager(six.with_metaclass(OpExecutor, object)):
     exceptions. Valid values are the constants defined in
     :class:`~ncclient.operations.RaiseMode`.
     The default value is :attr:`~ncclient.operations.RaiseMode.ALL`."""
+
+    sync_mode = property(fget=lambda self: self._sync_mode, fset=__set_sync_mode)
+    """Specifies whether operations will be / was requested asynchronously. By default RPC's are synchronous."""

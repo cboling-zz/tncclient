@@ -21,13 +21,13 @@ from binascii import hexlify
 from lxml import etree
 from select import select
 
-from ncclient.capabilities import Capabilities
+from tncclient.capabilities import Capabilities
 
 import paramiko
 
-from ncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError
-from ncclient.transport.session import Session
-from ncclient.xml_ import *
+from tncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError
+from tncclient.transport.session import Session
+from tncclient.xml_ import *
 
 import logging
 logger = logging.getLogger("ncclient.transport.ssh")
@@ -313,11 +313,10 @@ class SSHSession(Session):
         self._channel = None
         self._connected = False
 
-
     # REMEMBER to update transport.rst if sig. changes, since it is hardcoded there
     def connect(self, host, port=830, timeout=None, unknown_host_cb=default_unknown_host_cb,
                 username=None, password=None, key_filename=None, allow_agent=True,
-                hostkey_verify=True, look_for_keys=True, ssh_config=None):
+                hostkey_verify=True, look_for_keys=True, ssh_config=None, **kwargs):
 
         """Connect via SSH and initialize the NETCONF session. First attempts the publickey authentication method and then password authentication.
 

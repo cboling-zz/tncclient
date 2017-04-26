@@ -4,7 +4,9 @@
 import pprint
 import argparse
 import os
-from ncclient import manager, xml_, capabilities
+#from ncclient import manager, xml_, capabilities
+from tncclient import manager, xml_, capabilities
+from tncclient.operations.rpc import SyncMode
 from lxml import etree
 from twisted.internet import reactor, defer
 from twisted.internet.defer import returnValue, inlineCallbacks
@@ -64,10 +66,14 @@ class Main(object):
         self.port = port
         self.username = username
         self.password = password
-        self.is_async = is_async or is_twisted
-        self.is_twisted = is_twisted
         self.manager = None
         self.capabilities = None
+        if is_twisted:
+            self.sync_mode = SyncMode.ASYNCHRONOUS_TWISTED
+        elif is_async:
+            self.sync_mode = SyncMode.ASYNCHRONOUS_THREADED
+        else:
+            self.sync_mode = SyncMode.SYNCHRONOUS
 
     def __str__(self):
         return "netconf {}@{}".format(self.username, self.ip_address)
@@ -85,8 +91,9 @@ class Main(object):
                                      allow_agent=False,
                                      look_for_keys=False,
                                      hostkey_verify=False,
-                                     is_twisted=self.is_twisted)
-        if self.is_async:
+                                     sync_mode=self.sync_mode)
+
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_THREADED:
             connection.async_mode = True
 
         return connection
@@ -118,7 +125,7 @@ class Main(object):
     def wait_for_response(self, request):
         # If not asynchronous, request is an RpcReply object
         # If async, request is an operations object
-        if not self.is_async:
+        if self.sync_mode == SyncMode.SYNCHRONOUS:
             return request
 
         def check_async(op):
@@ -129,7 +136,7 @@ class Main(object):
             elif not op.reply.ok:  # <rpc-error>(s) present
                 return op.reply.error
 
-        if self.is_twisted:
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
             raise NotImplemented('TODO: Twisted is not yet supported in the test app')
         else:
             request.event.wait(self.manager.timeout)
