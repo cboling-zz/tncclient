@@ -59,12 +59,13 @@ def recursive_dict(element):
 
 
 class Main(object):
-    def __init__(self, ip_address, username, password, port=830, is_async=False):
+    def __init__(self, ip_address, username, password, port=830, is_async=False, is_twisted=False):
         self.ip_address = ip_address
         self.port = port
         self.username = username
         self.password = password
-        self.is_async = is_async
+        self.is_async = is_async or is_twisted
+        self.is_twisted = is_twisted
         self.manager = None
         self.capabilities = None
 
@@ -83,7 +84,8 @@ class Main(object):
                                      password=self.password,
                                      allow_agent=False,
                                      look_for_keys=False,
-                                     hostkey_verify=False)
+                                     hostkey_verify=False,
+                                     is_twisted=self.is_twisted)
         if self.is_async:
             connection.async_mode = True
 
@@ -119,7 +121,7 @@ class Main(object):
         if not self.is_async:
             return request
 
-        def check(op):
+        def check_async(op):
             from ncclient import NCClientError
 
             if op.error is not None:  # e.g. transport layer error
@@ -127,8 +129,11 @@ class Main(object):
             elif not op.reply.ok:  # <rpc-error>(s) present
                 return op.reply.error
 
-        request.event.wait(self.manager.timeout)
-        error = check(request)
+        if self.is_twisted:
+            raise NotImplemented('TODO: Twisted is not yet supported in the test app')
+        else:
+            request.event.wait(self.manager.timeout)
+            error = check_async(request)
 
         return request.reply
 
@@ -210,6 +215,7 @@ if __name__ == '__main__':
     parser.add_argument('--password', '-p', action='store', default='mininet', help='Password')
     parser.add_argument('--port', '-P', action='store', default=830, help='TCP Port')
     parser.add_argument('--async', '-a', action='store_true', help='Do all operations asynchronously')
+    parser.add_argument('--twisted', '-t', action='store_true', help='Use twisted-reactor for all operations')
 
     args = parser.parse_args()
 
@@ -217,7 +223,8 @@ if __name__ == '__main__':
          port=args.port,
          username=args.username,
          password=args.password,
-         is_async=args.async).start()
+         is_async=args.async,
+         is_twisted=args.twisted).start()
 
 # 'http://www.adtran.com/ns/yang/adtran-hello?module=adtran-hello&revision=2015-07-20': [],
 
