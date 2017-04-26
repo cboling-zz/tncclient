@@ -12,25 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ncclient.operations.errors import OperationError, TimeoutExpiredError, MissingCapabilityError
-from ncclient.operations.rpc import RPC, RPCReply, RPCError, RaiseMode
+from tncclient.operations.errors import OperationError, TimeoutExpiredError, MissingCapabilityError
+from tncclient.operations.rpc import RPC, RPCReply, RPCError, RaiseMode, SyncMode
 
 # rfc4741 ops
 
-from ncclient.operations.retrieve import Get, GetConfig, GetSchema, GetReply, Dispatch
-from ncclient.operations.edit import EditConfig, CopyConfig, DeleteConfig, Validate, Commit, DiscardChanges
-from ncclient.operations.session import CloseSession, KillSession
-from ncclient.operations.lock import Lock, Unlock, LockContext
-from ncclient.operations.subscribe import CreateSubscription
+from tncclient.operations.retrieve import Get, GetConfig, GetSchema, GetReply, Dispatch
+from tncclient.operations.edit import EditConfig, CopyConfig, DeleteConfig, Validate, Commit, DiscardChanges
+from tncclient.operations.session import CloseSession, KillSession
+from tncclient.operations.lock import Lock, Unlock, LockContext
+from tncclient.operations.subscribe import CreateSubscription
 
 # others...
-from ncclient.operations.flowmon import PoweroffMachine, RebootMachine
+from tncclient.operations.flowmon import PoweroffMachine, RebootMachine
 
 __all__ = [
     'RPC',
     'RPCReply',
     'RPCError',
     'RaiseMode',
+    'SyncMode',
     'Get',
     'GetConfig',
     'GetSchema',

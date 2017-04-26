@@ -14,9 +14,9 @@
 
 'Boilerplate ugliness'
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
-from ncclient.operations.errors import OperationError, MissingCapabilityError
+from tncclient.operations.errors import OperationError, MissingCapabilityError
 
 def one_of(*args):
     "Verifies that only one of the arguments is not None"

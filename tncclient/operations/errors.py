@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ncclient import NCClientError
+from tncclient import NCClientError
 
 class OperationError(NCClientError):
     pass

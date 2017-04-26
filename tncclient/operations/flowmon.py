@@ -14,9 +14,9 @@
 
 'Power-control operations'
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
-from ncclient.operations.rpc import RPC
+from tncclient.operations.rpc import RPC
 
 PC_URN = "urn:liberouter:params:xml:ns:netconf:power-control:1.0"
 

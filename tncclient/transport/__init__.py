@@ -14,9 +14,9 @@
 
 "Transport layer"
 
-from ncclient.transport.session import Session, SessionListener
-from ncclient.transport.ssh import SSHSession
-from ncclient.transport.errors import *
+from tncclient.transport.session import Session, SessionListener
+from tncclient.transport.ssh import SSHSession
+from tncclient.transport.errors import *
 
 __all__ = [
     'Session',

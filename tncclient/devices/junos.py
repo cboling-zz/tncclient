@@ -15,10 +15,10 @@ generic information needed for interaction with a Netconf server.
 import re
 from lxml import etree
 from .default import DefaultDeviceHandler
-from ncclient.operations.third_party.juniper.rpc import GetConfiguration, LoadConfiguration, CompareConfiguration
-from ncclient.operations.third_party.juniper.rpc import ExecuteRpc, Command, Reboot, Halt, Commit
-from ncclient.operations.rpc import RPCError
-from ncclient.xml_ import to_ele
+from tncclient.operations.third_party.juniper.rpc import GetConfiguration, LoadConfiguration, CompareConfiguration
+from tncclient.operations.third_party.juniper.rpc import ExecuteRpc, Command, Reboot, Halt, Commit
+from tncclient.operations.rpc import RPCError
+from tncclient.xml_ import to_ele
 
 class JunosDeviceHandler(DefaultDeviceHandler):
     """

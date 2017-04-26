@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ncclient.operations.rpc import RPC, RPCReply
+from tncclient.operations.rpc import RPC, RPCReply
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 from lxml import etree
 
-from ncclient.operations import util
+from tncclient.operations import util
 
 class GetReply(RPCReply):
 

@@ -1,9 +1,9 @@
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
-from ncclient.operations.rpc import RPC
-from ncclient.operations.rpc import RPCReply
-from ncclient.operations.rpc import RPCError
-from ncclient import NCClientError
+from tncclient.operations.rpc import RPC
+from tncclient.operations.rpc import RPCReply
+from tncclient.operations.rpc import RPCError
+from tncclient import NCClientError
 
 class GetConfiguration(RPC):
     def request(self, format='xml', filter=None):

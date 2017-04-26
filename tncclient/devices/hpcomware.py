@@ -1,6 +1,6 @@
-from ncclient.xml_ import BASE_NS_1_0
+from tncclient.xml_ import BASE_NS_1_0
 from .default import DefaultDeviceHandler
-from ncclient.operations.third_party.hpcomware.rpc import DisplayCommand, ConfigCommand, Action, Rollback, Save
+from tncclient.operations.third_party.hpcomware.rpc import DisplayCommand, ConfigCommand, Action, Rollback, Save
 
 class HpcomwareDeviceHandler(DefaultDeviceHandler):
 

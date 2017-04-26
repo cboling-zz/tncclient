@@ -12,10 +12,10 @@ generic information needed for interaction with a Netconf server.
 
 """
 
-from ncclient.xml_ import BASE_NS_1_0
+from tncclient.xml_ import BASE_NS_1_0
 
 from .default import DefaultDeviceHandler
-from ncclient.operations.third_party.h3c.rpc import *
+from tncclient.operations.third_party.h3c.rpc import *
 
 
 class H3cDeviceHandler(DefaultDeviceHandler):

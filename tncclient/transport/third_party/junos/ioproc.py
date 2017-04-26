@@ -12,8 +12,8 @@ if sys.version>='2.7':
 else:
     from subprocess import Popen, PIPE, STDOUT
 
-from ncclient.transport.errors import SessionCloseError, TransportError, PermissionError
-from ncclient.transport.ssh import SSHSession
+from tncclient.transport.errors import SessionCloseError, TransportError, PermissionError
+from tncclient.transport.ssh import SSHSession
 
 MSG_DELIM = "]]>]]>"
 NETCONF_SHELL = 'xml-mode netconf need-trailer'

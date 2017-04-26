@@ -27,7 +27,7 @@ from lxml import etree
 # make sure you have the ElementTree v1.2.7+ lib as
 # well as lxml v3.0+
 
-from ncclient import NCClientError
+from tncclient import NCClientError
 
 parser = etree.XMLParser(recover=True)
 

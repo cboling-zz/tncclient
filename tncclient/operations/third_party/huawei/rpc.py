@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 # by yangxufeng.zhao
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
-from ncclient.operations.rpc import RPC
+from tncclient.operations.rpc import RPC
 
 
 class CLI(RPC):

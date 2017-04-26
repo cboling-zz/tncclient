@@ -1,6 +1,6 @@
 from lxml import etree
-from ncclient.xml_ import *
-from ncclient.operations.rpc import RPC
+from tncclient.xml_ import *
+from tncclient.operations.rpc import RPC
 
 
 class DisplayCommand(RPC):

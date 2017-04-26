@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 # by yangxufeng.zhao
 
-from ncclient.xml_ import *
-from ncclient.operations import util
+from tncclient.xml_ import *
+from tncclient.operations import util
 
-from ncclient.operations.rpc import RPC
+from tncclient.operations.rpc import RPC
 
 
 class GetBulk(RPC):

@@ -16,10 +16,10 @@ from threading import Event, Lock
 from uuid import uuid4
 import six
 
-from ncclient.xml_ import *
-from ncclient.transport import SessionListener
+from tncclient.xml_ import *
+from tncclient.transport import SessionListener
 
-from ncclient.operations.errors import OperationError, TimeoutExpiredError, MissingCapabilityError
+from tncclient.operations.errors import OperationError, TimeoutExpiredError, MissingCapabilityError
 
 import logging
 logger = logging.getLogger("ncclient.operations.rpc")
@@ -252,6 +252,19 @@ class RaiseMode(object):
     ALL = 2
     "Don't look at the `error-type`, always raise."
 
+class SyncMode(object):
+    """
+    Define how RPC operations are handled (sync, threaded-async, or twisted-reactor async)
+    """
+    SYNCHRONOUS = 0
+    "Block while waiting for RPCReply or RPCError before returining."
+
+    ASYNCHRONOUS_THREADED = 1
+    "Do not block, return immediately with RPC object. Use <rpc-object>.event to check on completion"
+
+    ASYNCHRONOUS_TWISTED = 2
+    "Do not block, return immediately with a deferred object."
+
 
 class RPC(object):
 
@@ -264,13 +277,14 @@ class RPC(object):
     "By default :class:`RPCReply`. Subclasses can specify a :class:`RPCReply` subclass."
 
 
-    def __init__(self, session, device_handler, async=False, timeout=30, raise_mode=RaiseMode.NONE):
+    def __init__(self, session, device_handler, timeout=30,
+                 raise_mode=RaiseMode.NONE, sync_mode=SyncMode.SYNCHRONOUS):
         """
         *session* is the :class:`~ncclient.transport.Session` instance
 
         *device_handler" is the :class:`~ncclient.devices.*.*DeviceHandler` instance
 
-        *async* specifies whether the request is to be made asynchronously, see :attr:`is_async`
+        *sync_mode* specifies whether the request is to be made asynchronously
 
         *timeout* is the timeout for a synchronous request, see :attr:`timeout`
 
@@ -282,7 +296,7 @@ class RPC(object):
                 self._assert(cap)
         except AttributeError:
             pass
-        self._async = async
+        self._sync_mode = sync_mode
         self._timeout = timeout
         self._raise_mode = raise_mode
         self._id = uuid4().urn # Keeps things simple instead of having a class attr with running ID that has to be locked
@@ -290,7 +304,7 @@ class RPC(object):
         self._listener.register(self._id, self)
         self._reply = None
         self._error = None
-        self._event = Event()
+        self._event = Event() if sync_mode is not SyncMode.ASYNCHRONOUS_TWISTED else None
         self._device_handler = device_handler
 
 
@@ -314,7 +328,10 @@ class RPC(object):
         logger.info('Requesting %r' % self.__class__.__name__)
         req = self._wrap(op)
         self._session.send(req)
-        if self._async:
+
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+            raise NotImplemented('TODO: Twisted is not yet supported')
+        elif self._sync_mode == SyncMode.ASYNCHRONOUS_THREADED:
             logger.debug('Async request, returning %r', self)
             return self
         else:
@@ -357,11 +374,13 @@ class RPC(object):
 
     def deliver_reply(self, raw):
         # internal use
+        assert self._sync_mode != SyncMode.ASYNCHRONOUS_TWISTED
         self._reply = self.REPLY_CLS(raw)
         self._event.set()
 
     def deliver_error(self, err):
         # internal use
+        assert self._sync_mode != SyncMode.ASYNCHRONOUS_TWISTED
         self._error = err
         self._event.set()
 
@@ -398,8 +417,12 @@ class RPC(object):
         return self._event
 
     def __set_async(self, async=True):
-        self._async = async
-        if async and not self._session.can_pipeline:
+        self.__set_sync_mode = SyncMode.ASYNCHRONOUS_THREADED if async else SyncMode.SYNCHRONOUS
+
+    def __set_sync_mode(self, mode=SyncMode.ASYNCHRONOUS_THREADED):
+        assert mode != SyncMode.ASYNCHRONOUS_TWISTED
+        self._sync_mode = mode
+        if  mode == SyncMode.ASYNCHRONOUS_THREADED and not self._session.can_pipeline:
             raise UserWarning('Asynchronous mode not supported for this device/session')
 
     def __set_raise_mode(self, mode):
@@ -412,7 +435,10 @@ class RPC(object):
     raise_mode = property(fget=lambda self: self._raise_mode, fset=__set_raise_mode)
     """Depending on this exception raising mode, an `rpc-error` in the reply may be raised as an :exc:`RPCError` exception. Valid values are the constants defined in :class:`RaiseMode`. """
 
-    is_async = property(fget=lambda self: self._async, fset=__set_async)
+    sync_mode = property(fget=lambda self: self._sync_mode, fset=__set_sync_mode)
+    """Specifies whether this RPC will be / was requested asynchronously. By default RPC's are synchronous."""
+
+    is_async = property(fget=lambda self: self._sync_mode, fset=__set_async)
     """Specifies whether this RPC will be / was requested asynchronously. By default RPC's are synchronous."""
 
     timeout = property(fget=lambda self: self._timeout, fset=__set_timeout)

@@ -13,11 +13,11 @@
 # limitations under the License.
 
 
-from ncclient.operations.rpc import RPC
+from tncclient.operations.rpc import RPC
 
-from ncclient.xml_ import *
+from tncclient.xml_ import *
 
-from ncclient.operations import util
+from tncclient.operations import util
 
 class CreateSubscription(RPC):
     "`create-subscription` RPC. Depends on the `:notification` capability."

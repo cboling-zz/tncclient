@@ -28,11 +28,12 @@ are completed, they will be moved to the Completed Question list below.
    How is this best supported in the twisted architecture:   
  - RPCListener, need to look into how it is used in both sync/async mode.  Is it only related
    to notifications?
- - What about the Manager's RaiseMode capability. Can this be supported as is? How do we bestg
+ - What about the Manager's RaiseMode capability. Can this be supported as is? How do we best
    tie this in with ErrBacks?
- 
-
-
+ - Before returning the deferred object, should we associate a callback and an errback to
+   handle the first stage of reception? 
+ - There is an RPC timeout parameter for synchronous mode. Can this be reused with twisted to
+   place a timeout on its request?
 
 ### Completed Questions
 
