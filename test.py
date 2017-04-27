@@ -98,6 +98,12 @@ class Main(object):
 
         return connection
 
+    def output_results(self, results, text=None):
+        print(os.linesep + '=================================================')
+        if text is not None:
+            print(text)
+        pp(results)
+
     def start(self):
         ##########################################################################
         # Connect to the NETCONF Server and exchange capabilities
@@ -106,21 +112,27 @@ class Main(object):
         self.manager = connection
         assert self.manager.connected
 
-        print(os.linesep + '=================================================')
-        print('Full device config follows:')
         full = self.get_full_config()
-        pp(full)
+
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+            full.addBoth(self.output_results, text='Full device config follows:')
+        else:
+            self.output_results(full, text='Full device config follows:')
 
         # full_dict = elem2dict(full.data_ele)
         # full_dict = etree_to_dict(full.data_ele)
         # full_dict = recursive_dict(full.data_ele)
         # pp(full_dict)
 
-        print(os.linesep + '=================================================')
-        print('ID Informaiton follows:')
-        xml, ident = self.get_id()
-        pp(xml)
-        print('  ID id: {}'.format(ident))
+        # Only do the next if not twisted. No special reason, just didn't want to mess with it
+
+        if self.sync_mode != SyncMode.ASYNCHRONOUS_TWISTED:
+            xml, ident = self.get_id()
+            self.output_results(xml, text='ID Information follows:')
+            print('  ID id: {}'.format(ident))
+
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+            reactor.run()
 
     def wait_for_response(self, request):
         # If not asynchronous, request is an RpcReply object
@@ -141,6 +153,8 @@ class Main(object):
         else:
             request.event.wait(self.manager.timeout)
             error = check_async(request)
+            if error is not None:
+                raise error
 
         return request.reply
 
@@ -188,6 +202,8 @@ class Main(object):
         return self.wait_for_response(request)
 
     def get_id(self, source='running'):
+        assert self.sync_mode != SyncMode.ASYNCHRONOUS_TWISTED
+
         id_filter = xml_.new_ele('filter')
         switch_filter = xml_.sub_ele(id_filter, 'capable-switch', nsmap=onf_ns)
         _ = xml_.sub_ele(switch_filter, 'id')
