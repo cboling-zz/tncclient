@@ -113,7 +113,13 @@ def connect_ssh(*args, **kwds):
     device_handler.add_additional_ssh_connect_params(kwds)
     global VENDOR_OPERATIONS
     VENDOR_OPERATIONS.update(device_handler.add_additional_operations())
-    session = transport.SSHSession(device_handler)
+
+    if kwds.get('sync_mode') == SyncMode.ASYNCHRONOUS_TWISTED:
+        from transport.third_party.twisted.tssh import TSSHSession
+        session = TSSHSession(device_handler)
+    else:
+        session = transport.SSHSession(device_handler)
+
     if "hostkey_verify" not in kwds or kwds["hostkey_verify"]:
         session.load_known_hosts()
 

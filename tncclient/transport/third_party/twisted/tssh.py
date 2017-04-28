@@ -1,5 +1,4 @@
-# Copyright 2012 Vaibhav Bajpai
-# Copyright 2009 Shikhar Bhushan
+# Copyright 2017-present Chip Boling
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,22 +11,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# TODO: This is a 'cut & paste' copy of the original SSHSession file
+#       to help in getting the twisted version to work as expected. It
+#       will hopefully be able to move the twisted specific logic back
+#       into that file once things work or perhaps refactor both to
+#       allow for a cleaner way to do things.
 
 import os
-import sys
-import socket
 import getpass
-from binascii import hexlify
-from lxml import etree
-from select import select
-
+from twisted.internet import defer, protocol, reactor
+from twisted.internet.defer import DeferredQueue, inlineCallbacks, returnValue
+from twisted.conch.client.knownhosts import KnownHostsFile
 from tncclient.capabilities import Capabilities
-
-import paramiko
-
 from tncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError
 from tncclient.transport.session import Session
 from tncclient.xml_ import *
+from tncclient.transport.session import NotificationHandler, SessionError, HelloHandler, TransportError
 
 import logging
 logger = logging.getLogger("ncclient.transport.ssh")
@@ -74,17 +73,17 @@ else:
     from io import BytesIO as StringIO
 
 
-
-class SSHSession(Session):
-
-    "Implements a :rfc:`4742` NETCONF session over SSH."
-
+class TSSHSession(Session):
+    """
+    Implements a :rfc:`4742` NETCONF session over SSH (provided by twisted-conch).
+    """
     def __init__(self, device_handler):
         capabilities = Capabilities(device_handler.get_capabilities())
         Session.__init__(self, capabilities)
-        self._host_keys = paramiko.HostKeys()
+        self._host_keys = KnownHostsFile(None)
         self._transport = None
         self._connected = False
+        self._connect_deferred = None
         self._channel = None
         self._channel_id = None
         self._channel_name = None
@@ -99,7 +98,9 @@ class SSHSession(Session):
         self._curchunksize = 0
         self._inendpos = 0
         self._size_num_list = []
-        self._message_list = []
+        # self._message_list = []
+        self._message_list = DeferredQueue()            # Incoming messages
+        self._tx_deferred = None
 
     def _parse(self):
         "Messages ae delimited by MSG_DELIM. The buffer could have grown by a maximum of BUF_SIZE bytes everytime this method is called. Retains state across method calls and if a byte has been read it will not be considered again."
@@ -295,27 +296,45 @@ class SSHSession(Session):
         if filename is None:
             filename = os.path.expanduser('~/.ssh/known_hosts')
             try:
-                self._host_keys.load(filename)
+                self._host_keys = KnownHostsFile.fromPath(filename)
             except IOError:
                 # for windows
                 filename = os.path.expanduser('~/ssh/known_hosts')
                 try:
-                    self._host_keys.load(filename)
+                    self._host_keys = KnownHostsFile.fromPath(filename)
                 except IOError:
                     pass
         else:
-            self._host_keys.load(filename)
+            self._host_keys = KnownHostsFile.fromPath(filename)
 
     def close(self):
+        if self._connect_deferred:
+            self._connect_deferred.cancel()
+
         if self._transport.is_active():
             self._transport.close()
         self._channel = None
         self._connected = False
 
+    @inlineCallbacks
+    def wait_for_response(self):
+        logging.info('wait-for-response')
+        try:
+            response = yield self._message_list.get()
+            logging.info('got-response')
+            returnValue(response)
+
+        except Exception as e:
+            self.log.info('wait-for-response-exception', exc=str(e))
+            # self.last_response = None
+
     # REMEMBER to update transport.rst if sig. changes, since it is hardcoded there
-    def connect(self, host, port=830, timeout=None, unknown_host_cb=default_unknown_host_cb,
+    @inlineCallbacks
+    def connect(self, host, port=830, timeout=30, unknown_host_cb=default_unknown_host_cb,
                 username=None, password=None, key_filename=None, allow_agent=True,
                 hostkey_verify=True, look_for_keys=True, ssh_config=None, **kwargs):
+
+        from transport import NetconfTransport
 
         """Connect via SSH and initialize the NETCONF session. First attempts the publickey authentication method and then password authentication.
 
@@ -348,231 +367,186 @@ class SSHSession(Session):
         if ssh_config is True:
             ssh_config = "~/.ssh/config" if sys.platform != "win32" else "~/ssh/config"
         if ssh_config is not None:
-            config = paramiko.SSHConfig()
-            config.parse(open(os.path.expanduser(ssh_config)))
-            config = config.lookup(host)
-            host = config.get("hostname", host)
-            if username is None:
-                username = config.get("user")
-            if key_filename is None:
-                key_filename = config.get("identityfile")
+            raise NotImplemented('TODO: does Twisted conch support the next set of calls')
+            # config = paramiko.SSHConfig()
+            # config.parse(open(os.path.expanduser(ssh_config)))
+            # config = config.lookup(host)
+            # host = config.get("hostname", host)
+            # if username is None:
+            #     username = config.get("user")
+            # if key_filename is None:
+            #     key_filename = config.get("identityfile")
 
         if username is None:
             username = getpass.getuser()
 
-        sock = None
         if config.get("proxycommand"):
-            sock = paramiko.proxy.ProxyCommand(config.get("proxycommand"))
+            raise NotImplemented('TODO: does Twisted conch support proxycommand?')
         else:
-            for res in socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM):
-                af, socktype, proto, canonname, sa = res
-                try:
-                    sock = socket.socket(af, socktype, proto)
-                    sock.settimeout(timeout)
-                except socket.error:
-                    continue
-                try:
-                    sock.connect(sa)
-                except socket.error:
-                    sock.close()
-                    continue
-                break
-            else:
-                raise SSHError("Could not open socket to %s:%s" % (host, port))
+            try:
+                host_keys = self._host_keys if hostkey_verify else None
 
-        t = self._transport = paramiko.Transport(sock)
-        t.set_log_channel(logger.name)
-        if config.get("compression") == 'yes':
-            t.use_compression()
+                if key_filename is None:
+                    key_filenames = []
+                elif isinstance(key_filename, (str, bytes)):
+                    key_filenames = [key_filename]
+                else:
+                    key_filenames = key_filename
+
+                self._transport = protocol.ClientCreator(reactor,
+                                                         NetconfTransport,
+                                                         username=username,
+                                                         password=password,
+                                                         host_keys=host_keys,
+                                                         key_filenames=key_filenames,
+                                                         allow_agent=allow_agent,
+                                                         look_for_keys=look_for_keys,
+                                                         device_handler=self._device_handler,
+                                                         session=self)
+
+                self._connect_deferred = self._transport.connectTCP(host=host, port=port, timeout=timeout)
+
+                def connect_fail(err):
+                    self._connect_deferred = None
+                    raise err
+
+                self._connect_deferred.addErrback(connect_fail)
+                results = yield self._connect_deferred
+
+                self._connected = True
+
+                # subsystem_names = self._device_handler.get_ssh_subsystem_names()
+                #
+                # for subname in subsystem_names:
+                #     from channel import NetconfChannel
+                #
+                #     c = NetconfChannel(subname)
+                #
+                #     try:
+                #         # connection = self.transport.
+                #         results = yield self.openChannel(c)
+                #         self._channel = c
+                #
+                #     except Exception as e:
+                #         logging.exception(e.message)        # TODO: Test various modes of failures
+                #
+                #         handle_exception = self._device_handler.handle_connection_exceptions(self)
+                #
+                #         if not handle_exception:
+                #             continue
+                # if self._channel is None:
+                #     raise SSHError("Could not open connection, possibly due to unacceptable"
+                #                    " SSH subsystem name.")
+                #
+                # # Greeting stuff
+                # error = [None]  # so that err_cb can bind error[0]. just how it is.
+                #
+                # # callbacks
+                # def ok_cb(id, capabilities):
+                #     self._id = id
+                #     self.server_capabilities = capabilities
+                #
+                # def err_cb(err):
+                #     error[0] = err
+                #
+                # self.add_listener(NotificationHandler(self._notification_q))
+                # listener = HelloHandler(ok_cb, err_cb)
+                # self.add_listener(listener)
+                #
+                # self._connect_deferred = self.sendMsg(HelloHandler.build(self._client_capabilities,
+                #                                                          self._device_handler))
+                # watchdog = self.add_watchdog(self._connect_deferred, listener=listener)
+                #
+                # results = yield watchdog
+                # # received hello message or an error happened
+                # if error[0]:
+                #     raise error[0]
+
+            except Exception as e:
+                logger.exception(e.message)     # TODO: Test various failure and refactor this
+                raise
+
+    def sendMsg(self, data):
+        """Send the supplied *message* (xml string) to NETCONF server."""
+        chan = self._channel
+
+        if not self.connected or not chan:
+            raise TransportError('Not connected to NETCONF server')
+
+        def start_delim(data_len): return '\n#%s\n'% data_len
 
         try:
-            t.start_client()
-        except paramiko.SSHException:
-            raise SSHError('Negotiation failed')
+            # send a HELLO msg using v1.0 EOM markers.
+            validated_element(data, tags='{urn:ietf:params:xml:ns:netconf:base:1.0}hello')
+            data = "%s%s" % (data, MSG_DELIM)
 
-        # host key verification
-        server_key = t.get_remote_server_key()
+        except XMLError:
+            # this is not a HELLO msg
+            # we publish v1.1 support
+            if 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
+                if self._server_capabilities:
+                    if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities:
+                        # send using v1.1 chunked framing
+                        data = "%s%s%s" % (start_delim(len(data)), data, END_DELIM)
+                    elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities:
+                        # send using v1.0 EOM markers
+                        data = "%s%s" % (data, MSG_DELIM)
+                    else:
+                        raise Exception
+                else:
+                    logger.debug('HELLO msg was sent, but server capabilities are still not known')
+                    raise Exception
 
-        fingerprint = _colonify(hexlify(server_key.get_fingerprint()))
+            # we publish only v1.0 support
+            else:
+                # send using v1.0 EOM markers
+                data = "%s%s" % (data, MSG_DELIM)
+        finally:
+            logger.debug("Sending: %s", data)
+            return chan.write(data)
 
-        if hostkey_verify:
-            known_host = self._host_keys.check(host, server_key)
-            if not known_host and not unknown_host_cb(host, fingerprint):
-                raise SSHUnknownHostError(host, fingerprint)
+    def add_watchdog(self, deferred, listener=None, timeout=60):
+        def callback(value):
+            if listener:
+                self.remove_listener(listener)
 
-        if key_filename is None:
-            key_filenames = []
-        elif isinstance(key_filename, (str, bytes)):
-            key_filenames = [ key_filename ]
-        else:
-            key_filenames = key_filename
+            if not watchdog.called:
+                watchdog.cancel()
+                logger.info('initialized: session-id=%s | server_capabilities=%s' %
+                            (self._id, self.server_capabilities))
+            else:
+                raise SessionError('Capability exchange timed out')
+            return value
 
-        self._auth(username, password, key_filenames, allow_agent, look_for_keys)
+        deferred.addBoth(callback)
 
-        self._connected = True # there was no error authenticating
-        # TODO: leopoul: Review, test, and if needed rewrite this part
-        subsystem_names = self._device_handler.get_ssh_subsystem_names()
-        for subname in subsystem_names:
-            c = self._channel = self._transport.open_session()
-            self._channel_id = c.get_id()
-            channel_name = "%s-subsystem-%s" % (subname, str(self._channel_id))
-            c.set_name(channel_name)
-            try:
-                c.invoke_subsystem(subname)
-            except paramiko.SSHException as e:
-                logger.info("%s (subsystem request rejected)", e)
-                handle_exception = self._device_handler.handle_connection_exceptions(self)
-                # Ignore the exception, since we continue to try the different
-                # subsystem names until we find one that can connect.
-                #have to handle exception for each vendor here
-                if not handle_exception:
-                    continue
-            self._channel_name = c.get_name()
-            self._post_connect()
-            return
+        from twisted.internet import reactor
+        watchdog = reactor.callLater(timeout, defer.timeout, deferred)
+        return watchdog
+
+    def _connect_failed(self, error):
         raise SSHError("Could not open connection, possibly due to unacceptable"
                        " SSH subsystem name.")
-
-    def _auth(self, username, password, key_filenames, allow_agent,
-              look_for_keys):
-        saved_exception = None
-
-        for key_filename in key_filenames:
-            for cls in (paramiko.RSAKey, paramiko.DSSKey, paramiko.ECDSAKey):
-                try:
-                    key = cls.from_private_key_file(key_filename, password)
-                    logger.debug("Trying key %s from %s" %
-                              (hexlify(key.get_fingerprint()), key_filename))
-                    self._transport.auth_publickey(username, key)
-                    return
-                except Exception as e:
-                    saved_exception = e
-                    logger.debug(e)
-
-        if allow_agent:
-            for key in paramiko.Agent().get_keys():
-                try:
-                    logger.debug("Trying SSH agent key %s" %
-                                 hexlify(key.get_fingerprint()))
-                    self._transport.auth_publickey(username, key)
-                    return
-                except Exception as e:
-                    saved_exception = e
-                    logger.debug(e)
-
-        keyfiles = []
-        if look_for_keys:
-            rsa_key = os.path.expanduser("~/.ssh/id_rsa")
-            dsa_key = os.path.expanduser("~/.ssh/id_dsa")
-            ecdsa_key = os.path.expanduser("~/.ssh/id_ecdsa")
-            if os.path.isfile(rsa_key):
-                keyfiles.append((paramiko.RSAKey, rsa_key))
-            if os.path.isfile(dsa_key):
-                keyfiles.append((paramiko.DSSKey, dsa_key))
-            if os.path.isfile(ecdsa_key):
-                keyfiles.append((paramiko.ECDSAKey, ecdsa_key))
-            # look in ~/ssh/ for windows users:
-            rsa_key = os.path.expanduser("~/ssh/id_rsa")
-            dsa_key = os.path.expanduser("~/ssh/id_dsa")
-            ecdsa_key = os.path.expanduser("~/ssh/id_ecdsa")
-            if os.path.isfile(rsa_key):
-                keyfiles.append((paramiko.RSAKey, rsa_key))
-            if os.path.isfile(dsa_key):
-                keyfiles.append((paramiko.DSSKey, dsa_key))
-            if os.path.isfile(ecdsa_key):
-                keyfiles.append((paramiko.ECDSAKey, ecdsa_key))
-
-        for cls, filename in keyfiles:
-            try:
-                key = cls.from_private_key_file(filename, password)
-                logger.debug("Trying discovered key %s in %s" %
-                          (hexlify(key.get_fingerprint()), filename))
-                self._transport.auth_publickey(username, key)
-                return
-            except Exception as e:
-                saved_exception = e
-                logger.debug(e)
-
-        if password is not None:
-            try:
-                self._transport.auth_password(username, password)
-                return
-            except Exception as e:
-                saved_exception = e
-                logger.debug(e)
-
-        if saved_exception is not None:
-            # need pep-3134 to do this right
-            raise AuthenticationError(repr(saved_exception))
-
-        raise AuthenticationError("No authentication methods available")
-
-    def run(self):
-        chan = self._channel
-        q = self._q
-
-        def start_delim(data_len): return '\n#%s\n'%(data_len)
-
-        try:
-            while True:
-                # select on a paramiko ssh channel object does not ever return it in the writable list, so channels don't exactly emulate the socket api
-                r, w, e = select([chan], [], [], TICK)
-                # will wakeup evey TICK seconds to check if something to send, more if something to read (due to select returning chan in readable list)
-                if r:
-                    data = chan.recv(BUF_SIZE)
-                    if data:
-                        self._buffer.write(data)
-                        if self._server_capabilities:
-                            if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities and 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
-                                logger.debug("Selecting netconf:base:1.1 for encoding")
-                                self._parse11()
-                            elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:netconf:base:1.0' in self._client_capabilities:
-                                logger.debug("Selecting netconf:base:1.0 for encoding")
-                                self._parse10()
-                            else: raise Exception
-                        else:
-                            self._parse10() # HELLO msg uses EOM markers.
-                    else:
-                        raise SessionCloseError(self._buffer.getvalue())
-                if not q.empty() and chan.send_ready():
-                    logger.debug("Sending message")
-                    data = q.get()
-                    try:
-                        # send a HELLO msg using v1.0 EOM markers.
-                        validated_element(data, tags='{urn:ietf:params:xml:ns:netconf:base:1.0}hello')
-                        data = "%s%s"%(data, MSG_DELIM)
-                    except XMLError:
-                        # this is not a HELLO msg
-                        # we publish v1.1 support
-                        if 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
-                            if self._server_capabilities:
-                                if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities:
-                                    # send using v1.1 chunked framing
-                                    data = "%s%s%s"%(start_delim(len(data)), data, END_DELIM)
-                                elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities:
-                                    # send using v1.0 EOM markers
-                                    data = "%s%s"%(data, MSG_DELIM)
-                                else: raise Exception
-                            else:
-                                logger.debug('HELLO msg was sent, but server capabilities are still not known')
-                                raise Exception
-                        # we publish only v1.0 support
-                        else:
-                            # send using v1.0 EOM markers
-                            data = "%s%s"%(data, MSG_DELIM)
-                    finally:
-                        logger.debug("Sending: %s", data)
-                        while data:
-                            n = chan.send(data)
-                            if n <= 0:
-                                raise SessionCloseError(self._buffer.getvalue(), data)
-                            data = data[n:]
-        except Exception as e:
-            logger.debug("Broke out of main loop, error=%r", e)
-            self._dispatch_error(e)
-            self.close()
 
     @property
     def transport(self):
         "Underlying `paramiko.Transport <http://www.lag.net/paramiko/docs/paramiko.Transport-class.html>`_ object. This makes it possible to call methods like :meth:`~paramiko.Transport.set_keepalive` on it."
         return self._transport
+
+    @property
+    def connect_deferred(self):
+        return self._connect_deferred
+
+    @property
+    def channel(self):
+        return self._channel
+
+    @channel.setter
+    def channel(self, value):
+        self._channel = value
+
+    def run(self):
+        pass
+
+    def scp(self):
+        pass

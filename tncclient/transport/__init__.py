@@ -16,12 +16,14 @@
 
 from tncclient.transport.session import Session, SessionListener
 from tncclient.transport.ssh import SSHSession
+from tncclient.transport.third_party.twisted.tssh import TSSHSession
 from tncclient.transport.errors import *
 
 __all__ = [
     'Session',
     'SessionListener',
     'SSHSession',
+    'TSSHSession',
     'TransportError',
     'AuthenticationError',
     'SessionCloseError',

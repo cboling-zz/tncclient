@@ -104,35 +104,41 @@ class Main(object):
             print(text)
         pp(results)
 
-    def start(self):
+    def do_work(self):
         ##########################################################################
         # Connect to the NETCONF Server and exchange capabilities
 
         connection = self.connect()
         self.manager = connection
-        assert self.manager.connected
 
-        full = self.get_full_config()
+        # full = self.get_full_config()
+        #
+        # if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+        #     full.addBoth(self.output_results, text='Full device config follows:')
+        # else:
+        #     assert self.manager.connected
+        #     self.output_results(full, text='Full device config follows:')
+        #
+        # # full_dict = elem2dict(full.data_ele)
+        # # full_dict = etree_to_dict(full.data_ele)
+        # # full_dict = recursive_dict(full.data_ele)
+        # # pp(full_dict)
+        #
+        # # Only do the next if not twisted. No special reason, just didn't want to mess with it
+        #
+        # if self.sync_mode != SyncMode.ASYNCHRONOUS_TWISTED:
+        #     xml, ident = self.get_id()
+        #     self.output_results(xml, text='ID Information follows:')
+        #     print('  ID id: {}'.format(ident))
 
+
+    def start(self):
         if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
-            full.addBoth(self.output_results, text='Full device config follows:')
-        else:
-            self.output_results(full, text='Full device config follows:')
-
-        # full_dict = elem2dict(full.data_ele)
-        # full_dict = etree_to_dict(full.data_ele)
-        # full_dict = recursive_dict(full.data_ele)
-        # pp(full_dict)
-
-        # Only do the next if not twisted. No special reason, just didn't want to mess with it
-
-        if self.sync_mode != SyncMode.ASYNCHRONOUS_TWISTED:
-            xml, ident = self.get_id()
-            self.output_results(xml, text='ID Information follows:')
-            print('  ID id: {}'.format(ident))
-
-        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+            reactor.callLater(0, self.do_work)
             reactor.run()
+
+        else:
+            self.do_work()
 
     def wait_for_response(self, request):
         # If not asynchronous, request is an RpcReply object

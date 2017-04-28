@@ -43,7 +43,7 @@ class Session(Thread):
         self._q = Queue()
         self._notification_q = Queue()
         self._client_capabilities = capabilities
-        self._server_capabilities = None # yet
+        self._server_capabilities = None  # yet
         self._id = None # session-id
         self._connected = False # to be set/cleared by subclass implementation
         logger.debug('%r created: client_capabilities=%r' %
@@ -105,7 +105,7 @@ class Session(Thread):
         self.remove_listener(listener)
         if error[0]:
             raise error[0]
-        #if ':base:1.0' not in self.server_capabilities:
+        #if ':base:1.0' not in self._server_capabilities:
         #    raise MissingCapabilityError(':base:1.0')
         logger.info('initialized: session-id=%s | server_capabilities=%s' %
                     (self._id, self._server_capabilities))
@@ -180,6 +180,10 @@ class Session(Thread):
     def server_capabilities(self):
         "Server's :class:`Capabilities`"
         return self._server_capabilities
+
+    @server_capabilities.setter
+    def server_capabilities(self, caps):
+        self._server_capabilities = caps
 
     @property
     def id(self):
