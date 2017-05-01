@@ -413,55 +413,6 @@ class TSSHSession(Session):
                 self._connect_deferred.addErrback(connect_fail)
                 results = yield self._connect_deferred
 
-                self._connected = True
-
-                # subsystem_names = self._device_handler.get_ssh_subsystem_names()
-                #
-                # for subname in subsystem_names:
-                #     from channel import NetconfChannel
-                #
-                #     c = NetconfChannel(subname)
-                #
-                #     try:
-                #         # connection = self.transport.
-                #         results = yield self.openChannel(c)
-                #         self._channel = c
-                #
-                #     except Exception as e:
-                #         logging.exception(e.message)        # TODO: Test various modes of failures
-                #
-                #         handle_exception = self._device_handler.handle_connection_exceptions(self)
-                #
-                #         if not handle_exception:
-                #             continue
-                # if self._channel is None:
-                #     raise SSHError("Could not open connection, possibly due to unacceptable"
-                #                    " SSH subsystem name.")
-                #
-                # # Greeting stuff
-                # error = [None]  # so that err_cb can bind error[0]. just how it is.
-                #
-                # # callbacks
-                # def ok_cb(id, capabilities):
-                #     self._id = id
-                #     self.server_capabilities = capabilities
-                #
-                # def err_cb(err):
-                #     error[0] = err
-                #
-                # self.add_listener(NotificationHandler(self._notification_q))
-                # listener = HelloHandler(ok_cb, err_cb)
-                # self.add_listener(listener)
-                #
-                # self._connect_deferred = self.sendMsg(HelloHandler.build(self._client_capabilities,
-                #                                                          self._device_handler))
-                # watchdog = self.add_watchdog(self._connect_deferred, listener=listener)
-                #
-                # results = yield watchdog
-                # # received hello message or an error happened
-                # if error[0]:
-                #     raise error[0]
-
             except Exception as e:
                 logger.exception(e.message)     # TODO: Test various failure and refactor this
                 raise
@@ -524,6 +475,43 @@ class TSSHSession(Session):
         watchdog = reactor.callLater(timeout, defer.timeout, deferred)
         return watchdog
 
+    @inlineCallbacks
+    def post_connect(self):
+        self._connected = True
+
+        try:
+            # Greeting stuff   TODO: Probably want to do this in the 'connect' generator
+            error = [None]  # so that err_cb can bind error[0]. just how it is.
+
+            # callbacks
+            def ok_cb(id, capabilities):
+                self._connect_deferred.cancel()
+                self._connect_deferred = None
+                self._id = id
+                self.server_capabilities = capabilities
+
+            def err_cb(err):
+                error[0] = err
+
+            self.add_listener(NotificationHandler(self._notification_q))
+            listener = HelloHandler(ok_cb, err_cb)
+            self.add_listener(listener)
+
+            # Schedule a 60 second timeout waiting for server capabilities
+            d = defer.Deferred().addErrback(err_cb)
+            reactor.callLater(20, defer.timeout, d)
+
+            # Do the send
+            self.sendMsg(HelloHandler.build(self._client_capabilities, self._device_handler))
+
+            yield self._connect_deferred
+
+        except Exception as e:
+            logger.exception(e.message)  # TODO: Test various failure and refactor this
+            raise
+
+        returnValue(None)  # defer.succeed(None)
+
     def _connect_failed(self, error):
         raise SSHError("Could not open connection, possibly due to unacceptable"
                        " SSH subsystem name.")
@@ -544,6 +532,9 @@ class TSSHSession(Session):
     @channel.setter
     def channel(self, value):
         self._channel = value
+
+    # def set_connected(self, value):
+    #     self._connected = value
 
     def run(self):
         pass

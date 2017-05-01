@@ -32,15 +32,12 @@ logger = logging.getLogger('tncclient.transport.channel')
 
 class NetconfChannel(SSHChannel):
     name = 'session'
-
-    # def __init__(self, subsystem_name):
-    #     super(NetconfChannel, self).__init__()
-        # name = subsystem_name
+    #name = 'netconf'
 
     def openFailed(self, reason):
         """
         Called when the open failed for some reason.
-        reason.desc is a string descrption, reason.code the SSH error code.
+        reason.desc is a string description, reason.code the SSH error code.
 
         @type reason: L{error.ConchError}
         """
@@ -61,7 +58,8 @@ class NetconfChannel(SSHChannel):
 
         @type specificData: L{bytes}
         """
-        return defer.succeed(None)
+        logger.debug('Channel open')
+        return self.conn.session.post_connect()
 
     def dataReceived(self, data):
         """

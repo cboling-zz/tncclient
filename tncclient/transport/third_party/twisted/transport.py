@@ -22,6 +22,7 @@ from twisted.conch.ssh.userauth import SSHUserAuthClient
 from twisted.internet import defer
 from twisted.internet.protocol import connectionDone
 from twisted.python._oldstyle import _oldStyle
+from tncclient.transport.errors import SSHError
 
 logger = logging.getLogger('tncclient.transport.transport')
 
@@ -266,32 +267,29 @@ class UserAuth(SSHUserAuthClient):
         raise NotImplemented('TODO Private keys are not yet supported')
 
 
-class NetconfConnection(object, SSHConnection):
+@_oldStyle
+class NetconfConnection(SSHConnection):
+
     def __init__(self, device_handler):
-        super(NetconfConnection, self).__init__()
-        self._device_handler = device_handler           # TODO: May be able to clean this up (remove)
+        SSHConnection.__init__(self)
+        self._device_handler = device_handler      # TODO: May be able to clean this up (remove)
 
     def serviceStarted(self):
         """
         Called when the service is active on the transport.
         """
         # Open a new channel on this connection.
-        # self.openChannel(TrueChannel(2**16, 2**15, self))
-        # self.openChannel(FalseChannel(2**16, 2**15, self))
-        # self.openChannel(CatChannel(2**16, 2**15, self))
 
         subsystem_names = self._device_handler.get_ssh_subsystem_names()
 
         for subname in subsystem_names:
             from channel import NetconfChannel
 
-            c = NetconfChannel(2**16, 2**15, self)
+            c = NetconfChannel(conn=self)
 
             try:
                 self.openChannel(c)
-                session = self.transport.session
-                session.channel = c
-                session.connected = True
+                self.session.channel = c
 
             except Exception as e:
                 logging.exception(e.message)  # TODO: Test various modes of failures
@@ -300,37 +298,14 @@ class NetconfConnection(object, SSHConnection):
 
                 if not handle_exception:
                     continue
-        # if self._channel is None:
-        #     raise SSHError("Could not open connection, possibly due to unacceptable"
-        #                    " SSH subsystem name.")
-    #
-    #     # Greeting stuff
-    #     error = [None]  # so that err_cb can bind error[0]. just how it is.
-    #
-    #     # callbacks
-    #     def ok_cb(id, capabilities):
-    #         self._id = id
-    #         self.server_capabilities = capabilities
-    #
-    #     def err_cb(err):
-    #         error[0] = err
-    #
-    #     self.add_listener(NotificationHandler(self._notification_q))
-    #     listener = HelloHandler(ok_cb, err_cb)
-    #     self.add_listener(listener)
-    #
-    #     self._connect_deferred = self.sendMsg(HelloHandler.build(self._client_capabilities,
-    #                                                              self._device_handler))
-    #     watchdog = self.add_watchdog(self._connect_deferred, listener=listener)
-    #
-    #     results = yield watchdog
-    #     # received hello message or an error happened
-    #     if error[0]:
-    #         raise error[0]
-    #
-    # except Exception as e:
-    # logger.exception(e.message)  # TODO: Test various failure and refactor this
-    # raise
+
+        if self.session.channel is None:
+            raise SSHError("Could not open connection, possibly due to unacceptable"
+                           " SSH subsystem name.")
+
+    @property
+    def session(self):
+        return self.transport.session
 
     # TODO Other SSHConnection base class methods include
         # def serviceStopped(self):
