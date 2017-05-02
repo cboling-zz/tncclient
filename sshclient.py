@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 from sys import stdout
 
-from twisted.python.log import startLogging, err
+from twisted.python._oldstyle import _oldStyle
+from twisted.python import log
 
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred
@@ -24,24 +25,45 @@ CLIENT_CAPABILITIES = '<?xml version="1.0" encoding="UTF-8"?>'\
                       '</hello>'\
                       ']]>]]>'
 
+@_oldStyle
+class NetconfClientTransport(SSHClientTransport):
+    pass
+
 
 class NetconfSession(SSHChannel):
     name = 'session'
 
     def channelOpen(self, whatever):
         d = self.conn.sendRequest(self, 'subsystem', NS('netconf'), wantReply=True)
-        d.addCallbacks(self._cbNetconfSubsystem)
+        d.addCallbacks(self._cb_netconf_subsystem)
 
-    def _cbNetconfSubsystem(self, result):
-        client = SSHClientTransport()
+    def _cb_netconf_subsystem(self, result):
+        client = NetconfClientTransport()
         client.makeConnection(self)
         # self.dataReceived = client.dataReceived
-        self.conn._netconf.callback(client)
+        self.conn.netconf.callback(client)
+
+    def dataReceived(self, data):
+        """
+        Called when we receive data.
+
+        @type data: L{bytes}
+        """
+        log.msg('got server data %s'%repr(data))
 
 
+@_oldStyle
 class NetConfConnection(SSHConnection):
+    def __init__(self):
+        SSHConnection.__init__(self)
+        self._netconf = Deferred()
+
     def serviceStarted(self):
         self.openChannel(NetconfSession())
+
+    @property
+    def netconf(self):
+        return self._netconf
 
 
 def netconf(user, host, port):
@@ -49,13 +71,13 @@ def netconf(user, host, port):
     options['host'] = host
     options['port'] = port
     conn = NetConfConnection()
-    conn._netconf = Deferred()
     auth = SSHUserAuthClient(user, options, conn)
     connect(host, port, options, verifyHostKey, auth)
-    return conn._netconf
+    return conn.netconf
 
 
-def transfer(client):
+def send_capabilities(client):
+    log.msg('Sending client Capabilities to server')
     #d = client.makeDirectory('/tmp/foobarbaz', {})
     #d = client.
     print 'Scheduling stop'
@@ -68,18 +90,17 @@ def transfer(client):
 
 
 def main():
-    startLogging(stdout)
+    log.startLogging(stdout)
 
     user = 'mininet'
     host = '172.22.12.241'
     port = 830
 
     d = netconf(user, host, port)
-    d.addCallback(transfer)
-    d.addErrback(err, "Problem with NETCONF Connection")
+    d.addCallback(send_capabilities)
+    d.addErrback(log.err, "Problem with NETCONF Connection")
 
-    reactor.callLater(5, reactor.stop)
-    #d.addCallback()
+    reactor.callLater(3, reactor.stop)
     reactor.run()
 
 
