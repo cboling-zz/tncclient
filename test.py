@@ -111,20 +111,20 @@ class Main(object):
         connection = self.connect()
         self.manager = connection
 
-        # full = self.get_full_config()
-        #
-        # if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
-        #     full.addBoth(self.output_results, text='Full device config follows:')
-        # else:
-        #     assert self.manager.connected
-        #     self.output_results(full, text='Full device config follows:')
-        #
-        # # full_dict = elem2dict(full.data_ele)
-        # # full_dict = etree_to_dict(full.data_ele)
-        # # full_dict = recursive_dict(full.data_ele)
-        # # pp(full_dict)
-        #
-        # # Only do the next if not twisted. No special reason, just didn't want to mess with it
+        full = self.get_full_config()
+
+        if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
+            full.addBoth(self.output_results, text='Full device config follows:')
+        else:
+            assert self.manager.connected
+            self.output_results(full, text='Full device config follows:')
+
+        # full_dict = elem2dict(full.data_ele)
+        # full_dict = etree_to_dict(full.data_ele)
+        # full_dict = recursive_dict(full.data_ele)
+        # pp(full_dict)
+
+        # Only do the next if not twisted. No special reason, just didn't want to mess with it
         #
         # if self.sync_mode != SyncMode.ASYNCHRONOUS_TWISTED:
         #     xml, ident = self.get_id()
