@@ -28,6 +28,11 @@ from tncclient.transport.session import Session
 from tncclient.xml_ import *
 from tncclient.transport.session import NotificationHandler, SessionError, HelloHandler, TransportError
 
+from twisted.conch.scripts.cftp import ClientOptions
+from connection import NetConfConnection
+from twisted.conch.client.default import SSHUserAuthClient, verifyHostKey
+from twisted.conch.client.connect import connect
+
 import logging
 logger = logging.getLogger("ncclient.transport.ssh")
 
@@ -81,7 +86,7 @@ class TSSHSession(Session):
         capabilities = Capabilities(device_handler.get_capabilities())
         Session.__init__(self, capabilities)
         self._host_keys = KnownHostsFile(None)
-        self._transport = None
+        #self._transport = None
         self._connected = False
         self._connect_deferred = None
         self._channel = None
@@ -99,8 +104,11 @@ class TSSHSession(Session):
         self._inendpos = 0
         self._size_num_list = []
         # self._message_list = []
-        self._message_list = DeferredQueue()            # Incoming messages
         self._tx_deferred = None
+
+        self._options = ClientOptions()
+        self._connection = NetConfConnection(device_handler)
+        self._auth = None
 
     def _parse(self):
         "Messages ae delimited by MSG_DELIM. The buffer could have grown by a maximum of BUF_SIZE bytes everytime this method is called. Retains state across method calls and if a byte has been read it will not be considered again."
@@ -285,6 +293,30 @@ class TSSHSession(Session):
             logger.debug('Trying another round of parsing since there is still data')
             self._parse11()
 
+    def data_received(self, data):
+        """
+        Called when we receive data.
+
+        @type data: L{bytes}
+        """
+        logging.info('Client: got server data{}{}'.format(os.linesep, repr(data)))
+
+        if data:
+            self._buffer.write(data)
+            if self._server_capabilities:
+                if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities and 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
+                    logger.debug("Selecting netconf:base:1.1 for encoding")
+                    self._parse11()
+                elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:netconf:base:1.0' in self._client_capabilities:
+                    logger.debug("Selecting netconf:base:1.0 for encoding")
+                    self._parse10()
+                else:
+                    raise Exception
+            else:
+                self._parse10()  # HELLO msg uses EOM markers.
+        else:
+            raise SessionCloseError(self._buffer.getvalue())
+
     def load_known_hosts(self, filename=None):
 
         """Load host keys from an openssh :file:`known_hosts`-style file. Can
@@ -311,9 +343,11 @@ class TSSHSession(Session):
         if self._connect_deferred:
             self._connect_deferred.cancel()
 
-        if self._transport.is_active():
-            self._transport.close()
+        # if self._transport.is_active():
+        #     self._transport.close()
         self._channel = None
+        self._connection = None
+        self._auth = None
         self._connected = False
 
     @inlineCallbacks
@@ -329,12 +363,10 @@ class TSSHSession(Session):
             # self.last_response = None
 
     # REMEMBER to update transport.rst if sig. changes, since it is hardcoded there
-    @inlineCallbacks
+    #@inlineCallbacks
     def connect(self, host, port=830, timeout=30, unknown_host_cb=default_unknown_host_cb,
                 username=None, password=None, key_filename=None, allow_agent=True,
                 hostkey_verify=True, look_for_keys=True, ssh_config=None, **kwargs):
-
-        from transport import NetconfTransport
 
         """Connect via SSH and initialize the NETCONF session. First attempts the publickey authentication method and then password authentication.
 
@@ -393,25 +425,39 @@ class TSSHSession(Session):
                 else:
                     key_filenames = key_filename
 
-                self._transport = protocol.ClientCreator(reactor,
-                                                         NetconfTransport,
-                                                         username=username,
-                                                         password=password,
-                                                         host_keys=host_keys,
-                                                         key_filenames=key_filenames,
-                                                         allow_agent=allow_agent,
-                                                         look_for_keys=look_for_keys,
-                                                         device_handler=self._device_handler,
-                                                         session=self)
+                # TODO: Make use of keyfiles and other auth options
 
-                self._connect_deferred = self._transport.connectTCP(host=host, port=port, timeout=timeout)
+                self._options['host'] = host
+                self._options['port'] = port
+                self._auth = SSHUserAuthClient(username, self._options, self._connection)
 
-                def connect_fail(err):
-                    self._connect_deferred = None
-                    raise err
+                # TODO: Below is old way
+                # self._transport = protocol.ClientCreator(reactor,
+                #                                          NetconfTransport,
+                #                                          username=username,
+                #                                          password=password,
+                #                                          host_keys=host_keys,
+                #                                          key_filenames=key_filenames,
+                #                                          allow_agent=allow_agent,
+                #                                          look_for_keys=look_for_keys,
+                #                                          device_handler=self._device_handler,
+                #                                          session=self)
+                #
+                # self._connect_deferred = self._transport.connectTCP(host=host, port=port, timeout=timeout)
 
-                self._connect_deferred.addErrback(connect_fail)
-                results = yield self._connect_deferred
+                connect(host, port, self._options, verifyHostKey, self._auth)
+
+                # Add callback to set connected to true
+
+                self._connection.netconf_deferred.addCallbacks(self._connect_success,
+                                                               self._connect_failed)
+
+                # And do the Post Connect operations (send/receive hello)
+
+                self._connection.netconf_deferred.addCallbacks(self.post_connect,
+                                                               self._hello_failed)
+
+                return self._connection.netconf_deferred
 
             except Exception as e:
                 logger.exception(e.message)     # TODO: Test various failure and refactor this
@@ -424,7 +470,7 @@ class TSSHSession(Session):
         if not self.connected or not chan:
             raise TransportError('Not connected to NETCONF server')
 
-        def start_delim(data_len): return '\n#%s\n'% data_len
+        def start_delim(data_len): return '\n#%s\n' % data_len
 
         try:
             # send a HELLO msg using v1.0 EOM markers.
@@ -477,8 +523,6 @@ class TSSHSession(Session):
 
     @inlineCallbacks
     def post_connect(self):
-        self._connected = True
-
         try:
             # Greeting stuff   TODO: Probably want to do this in the 'connect' generator
             error = [None]  # so that err_cb can bind error[0]. just how it is.
@@ -512,9 +556,18 @@ class TSSHSession(Session):
 
         returnValue(None)  # defer.succeed(None)
 
+    def _connect_success(self, results):
+        # Route the channel received data to this object
+        self._channel = self._connection.channel
+        self._channel.dataReceived = self.data_received
+        self._connected = True
+
     def _connect_failed(self, error):
         raise SSHError("Could not open connection, possibly due to unacceptable"
                        " SSH subsystem name.")
+
+    def _hello_failed(self, error):
+        raise SSHError("Could not send or receive capabilities")
 
     @property
     def transport(self):
@@ -529,9 +582,9 @@ class TSSHSession(Session):
     def channel(self):
         return self._channel
 
-    @channel.setter
-    def channel(self, value):
-        self._channel = value
+    # @channel.setter
+    # def channel(self, value):
+    #     self._channel = value
 
     # def set_connected(self, value):
     #     self._connected = value

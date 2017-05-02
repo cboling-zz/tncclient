@@ -12,27 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+import struct
 import logging
-import getpass
-
-from twisted.conch.ssh import common, keys
-from twisted.conch.ssh.connection import SSHConnection
-from twisted.conch.ssh.keys import Key
 from twisted.conch.ssh.transport import SSHClientTransport
-from twisted.conch.ssh.userauth import SSHUserAuthClient
 from twisted.conch.ssh.channel import SSHChannel
-from twisted.internet import defer
-from twisted.internet.protocol import connectionDone
+from twisted.conch.ssh.common import NS
 from twisted.python._oldstyle import _oldStyle
-from tncclient.transport.errors import AuthenticationError, SessionCloseError, SSHError, SSHUnknownHostError
+from twisted.internet.defer import Deferred
 
 logger = logging.getLogger('tncclient.transport.channel')
 
+exit_status = 0
 
-class NetconfChannel(SSHChannel):
+
+@_oldStyle
+class NetConfChannel(SSHChannel):
     name = 'session'
-    #name = 'netconf'
+
+    def __init__(self, subsystem, conn=None):
+        SSHChannel.__init__(self)
+        self._netconf = Deferred()
+        self._channel = None
+        self._subsystem = subsystem
+
+    def channelOpen(self, _):
+        """
+        Called when the channel is opened.  specificData is any data that the
+        other side sent us when opening the channel.
+
+        @type specificData: L{bytes}
+        """
+        logging.info('Channel open')
+        # d = self.conn.sendRequest(self, 'subsystem', NS('netconf'), wantReply=True)
+        d = self.conn.sendRequest(self, 'subsystem', NS(self._subsystem), wantReply=True)
+        d.addCallbacks(self._cb_netconf_subsystem)
+
+    def _cb_netconf_subsystem(self, _):
+        logging.info('netconf subsystem ready')
+        transport = SSHClientTransport()
+        transport.makeConnection(self)
+
+        # Run the success callbacks for this connection
+        self.conn.netconf_deferred.callback(transport)
+
+    def dataReceived(self, data):
+        """
+        Called when we receive data.
+
+        @type data: L{bytes}
+        """
+        assert False             # Client should rx the data
+
+    def request_exit_status(self, data):
+        global exit_status
+        exit_status = int(struct.unpack('>L', data)[0])
+        logging.info('My exit status: %s' % exit_status)
 
     def openFailed(self, reason):
         """
@@ -48,94 +82,8 @@ class NetconfChannel(SSHChannel):
         Called when the channel is closed.  This means that both our side and
         the remote side have closed the channel.
         """
-        logger.debug('got data from remote: %s' % repr(self.data))
+        logger.debug('got close from remote')
         self.loseConnection()
-
-    def channelOpen(self, ignoredData):
-        """
-        Called when the channel is opened.  specificData is any data that the
-        other side sent us when opening the channel.
-
-        @type specificData: L{bytes}
-        """
-        logger.debug('Channel open')
-        return self.conn.session.post_connect()
-
-    def dataReceived(self, data):
-        """
-        Called when we receive data.
-
-        @type data: L{bytes}
-        """
-        self.data += data
-
-        def start_delim(data_len):
-            return '\n#%s\n' % data_len
-
-        # chan = self._channel
-        # q = self._q
-        #
-        #
-        #
-        # try:
-        #     while True:
-        #         # select on a paramiko ssh channel object does not ever return it in the writable list, so channels don't exactly emulate the socket api
-        #         r, w, e = select([chan], [], [], TICK)
-        #         # will wakeup evey TICK seconds to check if something to send, more if something to read (due to select returning chan in readable list)
-        #         if r:
-        #             data = chan.recv(BUF_SIZE)
-        #             if data:
-        #                 self._buffer.write(data)
-        #                 if self._server_capabilities:
-        #                     if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities and 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
-        #                         logger.debug("Selecting netconf:base:1.1 for encoding")
-        #                         self._parse11()
-        #                     elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:netconf:base:1.0' in self._client_capabilities:
-        #                         logger.debug("Selecting netconf:base:1.0 for encoding")
-        #                         self._parse10()
-        #                     else: raise Exception
-        #                 else:
-        #                     self._parse10() # HELLO msg uses EOM markers.
-        #             else:
-        #                 raise SessionCloseError(self._buffer.getvalue())
-        #         if not q.empty() and chan.send_ready():
-        #             logger.debug("Sending message")
-        #             data = q.get()
-        #             try:
-        #                 # send a HELLO msg using v1.0 EOM markers.
-        #                 validated_element(data, tags='{urn:ietf:params:xml:ns:netconf:base:1.0}hello')
-        #                 data = "%s%s"%(data, MSG_DELIM)
-        #             except XMLError:
-        #                 # this is not a HELLO msg
-        #                 # we publish v1.1 support
-        #                 if 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
-        #                     if self._server_capabilities:
-        #                         if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities:
-        #                             # send using v1.1 chunked framing
-        #                             data = "%s%s%s"%(start_delim(len(data)), data, END_DELIM)
-        #                         elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities:
-        #                             # send using v1.0 EOM markers
-        #                             data = "%s%s"%(data, MSG_DELIM)
-        #                         else: raise Exception
-        #                     else:
-        #                         logger.debug('HELLO msg was sent, but server capabilities are still not known')
-        #                         raise Exception
-        #                 # we publish only v1.0 support
-        #                 else:
-        #                     # send using v1.0 EOM markers
-        #                     data = "%s%s"%(data, MSG_DELIM)
-        #             finally:
-        #                 logger.debug("Sending: %s", data)
-        #                 while data:
-        #                     n = chan.send(data)
-        #                     if n <= 0:
-        #                         raise SessionCloseError(self._buffer.getvalue(), data)
-        #                     data = data[n:]
-        # except Exception as e:
-        #     logger.debug("Broke out of main loop, error=%r", e)
-        #     self._dispatch_error(e)
-        #     self.close()
-        pass
 
     # TODO Other SSHChannel methods include
     # def requestReceived(self, requestType, data):
