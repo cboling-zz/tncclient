@@ -25,7 +25,7 @@ data = '<?xml version="1.0" encoding="UTF-8"?>'\
        '</hello>'\
        ']]>]]>'
 
-class SFTPSession(SSHChannel):
+class NetconfSession(SSHChannel):
     name = 'session'
 
     def channelOpen(self, whatever):
@@ -37,20 +37,20 @@ class SFTPSession(SSHChannel):
         #client = FileTransferClient()
         client = SSHClientTransport()
         client.makeConnection(self)
-        self.dataReceived = client.dataReceived
+        # self.dataReceived = client.dataReceived
         self.conn._sftp.callback(client)
 
 
-class SFTPConnection(SSHConnection):
+class NetConfConnection(SSHConnection):
     def serviceStarted(self):
-        self.openChannel(SFTPSession())
+        self.openChannel(NetconfSession())
 
 
 def sftp(user, host, port):
     options = ClientOptions()
     options['host'] = host
     options['port'] = port
-    conn = SFTPConnection()
+    conn = NetConfConnection()
     conn._sftp = Deferred()
     auth = SSHUserAuthClient(user, options, conn)
     connect(host, port, options, verifyHostKey, auth)
@@ -60,12 +60,13 @@ def sftp(user, host, port):
 def transfer(client):
     #d = client.makeDirectory('/tmp/foobarbaz', {})
     #d = client.
-    d = reactor.callLater(10, reactor.stop)
+    print 'Scheduling stop'
+    #d = reactor.callLater(10, reactor.stop)
 
     def cbDir(ignored):
         print 'Sent request'
     #d.addCallback(cbDir)
-    return d
+    #return d
 
 
 def main():
@@ -77,7 +78,7 @@ def main():
     d = sftp(user, host, port)
     d.addCallback(transfer)
     d.addErrback(err, "Problem with SFTP transfer")
-    d.addCallback(lambda ignored: reactor.stop())
+    #d.addCallback(lambda ignored: reactor.stop())
     reactor.run()
 
 
