@@ -4,6 +4,8 @@
 import pprint
 import argparse
 import os
+import sys
+import logging
 #from ncclient import manager, xml_, capabilities
 from tncclient import manager, xml_, capabilities
 from tncclient.operations.rpc import SyncMode
@@ -247,6 +249,14 @@ if __name__ == '__main__':
     parser.add_argument('--twisted', '-t', action='store_true', help='Use twisted-reactor for all operations')
 
     args = parser.parse_args()
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
 
     Main(args.ip_address,
          port=args.port,
