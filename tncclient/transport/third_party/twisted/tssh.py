@@ -109,6 +109,7 @@ class TSSHSession(Session):
         self._options = ClientOptions()
         self._connection = NetConfConnection(device_handler)
         self._auth = None
+        self._hello_error = None
 
     def _parse(self):
         "Messages ae delimited by MSG_DELIM. The buffer could have grown by a maximum of BUF_SIZE bytes everytime this method is called. Retains state across method calls and if a byte has been read it will not be considered again."
@@ -368,31 +369,27 @@ class TSSHSession(Session):
                 username=None, password=None, key_filename=None, allow_agent=True,
                 hostkey_verify=True, look_for_keys=True, ssh_config=None, **kwargs):
 
-        """Connect via SSH and initialize the NETCONF session. First attempts the publickey authentication method and then password authentication.
+        """
+        Connect via SSH and initialize the NETCONF session. First attempts the publickey authentication method and
+        then password authentication.
 
-        To disable attempting publickey authentication altogether, call with *allow_agent* and *look_for_keys* as `False`.
+        To disable attempting publickey authentication altogether, call with *allow_agent* and *look_for_keys* as
+        `False`.
 
         *host* is the hostname or IP address to connect to
-
         *port* is by default 830, but some devices use the default SSH port of 22 so this may need to be specified
-
         *timeout* is an optional timeout for socket connect
-
-        *unknown_host_cb* is called when the server host key is not recognized. It takes two arguments, the hostname and the fingerprint (see the signature of :func:`default_unknown_host_cb`)
-
+        *unknown_host_cb* is called when the server host key is not recognized. It takes two arguments, the hostname
+                          and the fingerprint (see the signature of :func:`default_unknown_host_cb`)
         *username* is the username to use for SSH authentication
-
-        *password* is the password used if using password authentication, or the passphrase to use for unlocking keys that require it
-
+        *password* is the password used if using password authentication, or the passphrase to use for unlocking keys
+                   that require it
         *key_filename* is a filename where a the private key to be used can be found
-
         *allow_agent* enables querying SSH agent (if found) for keys
-
         *hostkey_verify* enables hostkey verification from ~/.ssh/known_hosts
-
         *look_for_keys* enables looking in the usual locations for ssh keys (e.g. :file:`~/.ssh/id_*`)
-
-        *ssh_config* enables parsing of an OpenSSH configuration file, if set to its path, e.g. :file:`~/.ssh/config` or to True (in this case, use :file:`~/.ssh/config`).
+        *ssh_config* enables parsing of an OpenSSH configuration file, if set to its path, e.g. :file:`~/.ssh/config`
+                     or to True (in this case, use :file:`~/.ssh/config`).
         """
         # Optionaly, parse .ssh/config
         config = {}
@@ -444,6 +441,12 @@ class TSSHSession(Session):
                 #                                          session=self)
                 #
                 # self._connect_deferred = self._transport.connectTCP(host=host, port=port, timeout=timeout)
+
+                # Set up listener in case response comes in before post_connect can be called
+
+                self.pre_connect()
+
+                # Attempt to connect now
 
                 connect(host, port, self._options, verifyHostKey, self._auth)
 
@@ -521,29 +524,57 @@ class TSSHSession(Session):
         watchdog = reactor.callLater(timeout, defer.timeout, deferred)
         return watchdog
 
+    def pre_connect(self):
+        """
+        Unlike the paramiko-based ncclient, we will most likely receive the hello reply
+        before the post_connect can be called. So set up the handler for the Hello first
+        :return: 
+        """
+        # Greeting stuff
+
+        self._hello_error = [None]
+
+        # callbacks
+        def ok_cb(id, capabilities):
+            self._connect_deferred.cancel()
+            self._connect_deferred = None
+            self._id = id
+            self.server_capabilities = capabilities
+
+        def err_cb(err):
+            self._hello_error[0] = err
+
+        self.add_listener(NotificationHandler(self._notification_q))
+        listener = HelloHandler(ok_cb, err_cb)
+        self.add_listener(listener)
+
+        # Schedule a 60 second timeout waiting for server capabilities
+        self._connect_deferred = defer.Deferred().addErrback(err_cb)
+        reactor.callLater(20, defer.timeout, SessionError("Capability exchange timed out"))
+
     @inlineCallbacks
     def post_connect(self):
         try:
             # Greeting stuff   TODO: Probably want to do this in the 'connect' generator
-            error = [None]  # so that err_cb can bind error[0]. just how it is.
-
-            # callbacks
-            def ok_cb(id, capabilities):
-                self._connect_deferred.cancel()
-                self._connect_deferred = None
-                self._id = id
-                self.server_capabilities = capabilities
-
-            def err_cb(err):
-                error[0] = err
-
-            self.add_listener(NotificationHandler(self._notification_q))
-            listener = HelloHandler(ok_cb, err_cb)
-            self.add_listener(listener)
-
-            # Schedule a 60 second timeout waiting for server capabilities
-            d = defer.Deferred().addErrback(err_cb)
-            reactor.callLater(20, defer.timeout, d)
+            #error = [None]  # so that err_cb can bind error[0]. just how it is.
+            #
+            # # callbacks
+            # def ok_cb(id, capabilities):
+            #     self._connect_deferred.cancel()
+            #     self._connect_deferred = None
+            #     self._id = id
+            #     self.server_capabilities = capabilities
+            #
+            # def err_cb(err):
+            #     error[0] = err
+            #
+            # self.add_listener(NotificationHandler(self._notification_q))
+            # listener = HelloHandler(ok_cb, err_cb)
+            # self.add_listener(listener)
+            #
+            # # Schedule a 60 second timeout waiting for server capabilities
+            # d = defer.Deferred().addErrback(err_cb)
+            # reactor.callLater(20, defer.timeout, d)
 
             # Do the send
             self.sendMsg(HelloHandler.build(self._client_capabilities, self._device_handler))
