@@ -107,7 +107,7 @@ class TSSHSession(Session):
         self._tx_deferred = None
 
         self._options = ClientOptions()
-        self._connection = NetConfConnection(device_handler)
+        self._connection = NetConfConnection(self, device_handler)
         self._auth = None
         self._hello_error = None
 
@@ -303,18 +303,23 @@ class TSSHSession(Session):
         logging.info('Client: got server data{}{}'.format(os.linesep, repr(data)))
 
         if data:
-            self._buffer.write(data)
-            if self._server_capabilities:
-                if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities and 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
-                    logger.debug("Selecting netconf:base:1.1 for encoding")
-                    self._parse11()
-                elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:netconf:base:1.0' in self._client_capabilities:
-                    logger.debug("Selecting netconf:base:1.0 for encoding")
-                    self._parse10()
+            try:
+                self._buffer.write(data)
+                if self._server_capabilities:
+                    if 'urn:ietf:params:netconf:base:1.1' in self._server_capabilities and 'urn:ietf:params:netconf:base:1.1' in self._client_capabilities:
+                        logger.debug("Selecting netconf:base:1.1 for encoding")
+                        self._parse11()
+                    elif 'urn:ietf:params:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:xml:ns:netconf:base:1.0' in self._server_capabilities or 'urn:ietf:params:netconf:base:1.0' in self._client_capabilities:
+                        logger.debug("Selecting netconf:base:1.0 for encoding")
+                        self._parse10()
+                    else:
+                        raise Exception
                 else:
-                    raise Exception
-            else:
-                self._parse10()  # HELLO msg uses EOM markers.
+                    self._parse10()  # HELLO msg uses EOM markers.
+
+            except Exception as e:
+                logger.exception(e)
+                raise
         else:
             raise SessionCloseError(self._buffer.getvalue())
 
@@ -364,7 +369,6 @@ class TSSHSession(Session):
             # self.last_response = None
 
     # REMEMBER to update transport.rst if sig. changes, since it is hardcoded there
-    #@inlineCallbacks
     def connect(self, host, port=830, timeout=30, unknown_host_cb=default_unknown_host_cb,
                 username=None, password=None, key_filename=None, allow_agent=True,
                 hostkey_verify=True, look_for_keys=True, ssh_config=None, **kwargs):
@@ -428,38 +432,15 @@ class TSSHSession(Session):
                 self._options['port'] = port
                 self._auth = SSHUserAuthClient(username, self._options, self._connection)
 
-                # TODO: Below is old way
-                # self._transport = protocol.ClientCreator(reactor,
-                #                                          NetconfTransport,
-                #                                          username=username,
-                #                                          password=password,
-                #                                          host_keys=host_keys,
-                #                                          key_filenames=key_filenames,
-                #                                          allow_agent=allow_agent,
-                #                                          look_for_keys=look_for_keys,
-                #                                          device_handler=self._device_handler,
-                #                                          session=self)
-                #
-                # self._connect_deferred = self._transport.connectTCP(host=host, port=port, timeout=timeout)
-
                 # Set up listener in case response comes in before post_connect can be called
-
-                self.pre_connect()
+                self.pre_connect(timeout)
 
                 # Attempt to connect now
-
                 connect(host, port, self._options, verifyHostKey, self._auth)
 
                 # Add callback to set connected to true
-
                 self._connection.netconf_deferred.addCallbacks(self._connect_success,
                                                                self._connect_failed)
-
-                # And do the Post Connect operations (send/receive hello)
-
-                self._connection.netconf_deferred.addCallbacks(self.post_connect,
-                                                               self._hello_failed)
-
                 return self._connection.netconf_deferred
 
             except Exception as e:
@@ -524,11 +505,10 @@ class TSSHSession(Session):
         watchdog = reactor.callLater(timeout, defer.timeout, deferred)
         return watchdog
 
-    def pre_connect(self):
+    def pre_connect(self, connect_timeout):
         """
         Unlike the paramiko-based ncclient, we will most likely receive the hello reply
         before the post_connect can be called. So set up the handler for the Hello first
-        :return: 
         """
         # Greeting stuff
 
@@ -536,62 +516,57 @@ class TSSHSession(Session):
 
         # callbacks
         def ok_cb(id, capabilities):
-            self._connect_deferred.cancel()
-            self._connect_deferred = None
+            d, self._connect_deferred = self._connect_deferred, None
+            d.cancel()
             self._id = id
             self.server_capabilities = capabilities
+            logger.info('Server capabilities received')
+            self._connection.netconf_deferred = reactor.callLater(0, self._post_connect)
 
         def err_cb(err):
-            self._hello_error[0] = err
+            if self._connect_deferred is not None:
+                self._hello_error[0] = err
 
         self.add_listener(NotificationHandler(self._notification_q))
         listener = HelloHandler(ok_cb, err_cb)
         self.add_listener(listener)
 
         # Schedule a 60 second timeout waiting for server capabilities
-        self._connect_deferred = defer.Deferred().addErrback(err_cb)
-        reactor.callLater(20, defer.timeout, SessionError("Capability exchange timed out"))
+        self._connect_deferred = reactor.callLater(connect_timeout, err_cb,
+                                                   SessionError("Capability exchange timed out"))
 
-    @inlineCallbacks
-    def post_connect(self):
+    def _post_connect(self):
+        # Route the channel received data to this object
+        # self._channel = self._connection.channel
+        # self._channel.dataReceived = self.data_received
+        self._connected = True
+        logger.info('Connection Success')
+
         try:
-            # Greeting stuff   TODO: Probably want to do this in the 'connect' generator
-            #error = [None]  # so that err_cb can bind error[0]. just how it is.
-            #
-            # # callbacks
-            # def ok_cb(id, capabilities):
-            #     self._connect_deferred.cancel()
-            #     self._connect_deferred = None
-            #     self._id = id
-            #     self.server_capabilities = capabilities
-            #
-            # def err_cb(err):
-            #     error[0] = err
-            #
-            # self.add_listener(NotificationHandler(self._notification_q))
-            # listener = HelloHandler(ok_cb, err_cb)
-            # self.add_listener(listener)
-            #
-            # # Schedule a 60 second timeout waiting for server capabilities
-            # d = defer.Deferred().addErrback(err_cb)
-            # reactor.callLater(20, defer.timeout, d)
-
             # Do the send
+            logger.info('Sending client capabilities')
             self.sendMsg(HelloHandler.build(self._client_capabilities, self._device_handler))
 
-            yield self._connect_deferred
+            # yield self._connect_deferred
 
         except Exception as e:
             logger.exception(e.message)  # TODO: Test various failure and refactor this
             raise
 
-        returnValue(None)  # defer.succeed(None)
+        #return defer.succeed('Capabilities sent')
 
     def _connect_success(self, results):
+        """
+        Connection succeeded
+        :param results:  (SSHClientTransport) transport
+        :return: 
+        """
         # Route the channel received data to this object
         self._channel = self._connection.channel
         self._channel.dataReceived = self.data_received
         self._connected = True
+        logger.info('Connection Success')
+        # return defer.succeed('Connection Success')
 
     def _connect_failed(self, error):
         raise SSHError("Could not open connection, possibly due to unacceptable"
@@ -613,12 +588,11 @@ class TSSHSession(Session):
     def channel(self):
         return self._channel
 
-    # @channel.setter
-    # def channel(self, value):
-    #     self._channel = value
-
-    # def set_connected(self, value):
-    #     self._connected = value
+    @channel.setter
+    def channel(self, chan):
+        if chan is not None:
+            chan.dataReceived = self.data_received
+        self._channel = chan
 
     def run(self):
         pass

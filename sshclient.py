@@ -18,35 +18,7 @@ from twisted.conch.ssh.connection import SSHConnection
 from twisted.conch.ssh.channel import SSHChannel
 from twisted.conch.ssh.transport import SSHClientTransport
 
-CLIENT_CAPABILITIES = '<?xml version="1.0" encoding="UTF-8"?>\n'\
-                      '<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">\n'\
-                      '  <capabilities>\n'\
-                      '    <capability>urn:ietf:params:netconf:base:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:base:1.1</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:writable-running:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:candidate:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:startup:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:rollback-on-error:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:interleave:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:notification:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:validate:1.0</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:validate:1.1</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:with-defaults:1.0?basic-mode=explicit&amp;also-supported=report-all,report-all-tagged,trim,explicit</capability>\n'\
-                      '    <capability>urn:ietf:params:netconf:capability:url:1.0?scheme=scp,file</capability>\n'\
-                      '    <capability>urn:onf:config:yang?module=of-config&amp;revision=2015-02-11</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-netconf-server?module=ietf-netconf-server&amp;revision=2014-01-24&amp;features=ssh,inbound-ssh</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-x509-cert-to-name?module=ietf-x509-cert-to-name&amp;revision=2013-03-26</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults?module=ietf-netconf-with-defaults&amp;revision=2010-06-09</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:netconf:notification:1.0?module=notifications&amp;revision=2008-07-14</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:netmod:notification?module=nc-notifications&amp;revision=2008-07-14</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-netconf-notifications?module=ietf-netconf-notifications&amp;revision=2011-08-07</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring?module=ietf-netconf-monitoring&amp;revision=2010-10-04</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:netconf:base:1.0?module=ietf-netconf&amp;revision=2011-03-08&amp;features=writable-running,candidate,rollback-on-error,validate,startup,url</capability>\n'\
-                      '    <capability>urn:ietf:params:xml:ns:yang:ietf-yang-types?module=ietf-yang-types&amp;revision=2013-07-15</capability>\n'\
-                      '  </capabilities>\n'\
-                      '  <session-id>1</session-id>\n'\
-                      '</hello>\n'\
-                      ']]>]]>\n'
+CLIENT_CAPABILITIES = '<?xml version="1.0" encoding="UTF-8"?><nc:hello xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0"><nc:capabilities><nc:capability>urn:ietf:params:netconf:capability:writable-running:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:rollback-on-error:1.0</nc:capability><nc:capability>urn:liberouter:params:netconf:capability:power-control:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:validate:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:confirmed-commit:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:url:1.0?scheme=http,ftp,file,https,sftp</nc:capability><nc:capability>urn:ietf:params:netconf:base:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:base:1.1</nc:capability><nc:capability>urn:ietf:params:netconf:capability:candidate:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:notification:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:xpath:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:startup:1.0</nc:capability><nc:capability>urn:ietf:params:netconf:capability:interleave:1.0</nc:capability></nc:capabilities></nc:hello>]]>]]>'
 
 GET_RUNNING_CONFIG = b'<?xml version="1.0" encoding="UTF-8"?>'\
                      b'<nc:rpc xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="urn:uuid:c1a4753b-ae78-41d4-909b-7a8b1f69798c">'\
@@ -140,12 +112,12 @@ class NetConfClient(object):
 
     def write(self, data, chunk_it=True):
         try:
-            log.msg('Sending {} octets of data'.format(len(data)))
-
+            log.msg('Sending {} octets of {}data'.
+                    format(len(data), 'chunked ' if chunk_it else ''))
             if chunk_it:
                 self.channel.write(NS('\n#{}\n'.format(len(data))))
 
-            self.channel.write(NS(data))
+            self.channel.write(data)
 
         except Exception as e:
             log.msg(e.message)
@@ -207,6 +179,9 @@ def send_capabilities(transport, client):
 
     try:
         log.msg('Sending client capabilities')
+
+        x = client.channel.getPeer()
+        y = client.channel.getHost()
         client.write(CLIENT_CAPABILITIES, chunk_it=False)
 
     except Exception as e:

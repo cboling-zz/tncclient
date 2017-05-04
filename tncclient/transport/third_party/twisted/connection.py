@@ -48,9 +48,10 @@ logger = logging.getLogger('tncclient.transport.connection')
 @_oldStyle
 class NetConfConnection(SSHConnection):
 
-    def __init__(self, device_handler):
+    def __init__(self, session, device_handler):
         SSHConnection.__init__(self)
         self._netconf = Deferred()
+        self._session = session                     # TODO: May be able to remove this later
         self._channel = None
         self._device_handler = device_handler      # TODO: May be able to clean this up (remove)
 
@@ -72,6 +73,7 @@ class NetConfConnection(SSHConnection):
                 self._channel = c           # TODO: Is this the right place to check
 
             except Exception as e:
+                self._session.channel = None
                 logging.exception(e.message)  # TODO: Test various modes of failures
                 handle_exception = self._device_handler.handle_connection_exceptions(self)
 
