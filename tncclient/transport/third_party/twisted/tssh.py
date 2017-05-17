@@ -30,11 +30,12 @@ from tncclient.transport.session import NotificationHandler, SessionError, Hello
 
 from twisted.conch.scripts.cftp import ClientOptions
 from connection import NetConfConnection
-from twisted.conch.client.default import SSHUserAuthClient, verifyHostKey
 from twisted.conch.client.connect import connect
+from auth import NetconfUserAuthClient, verify_host_key
 
 import logging
-logger = logging.getLogger("ncclient.transport.ssh")
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger("tncclient.transport.ssh")
 
 BUF_SIZE = 4096
 # v1.0: RFC 4742
@@ -417,8 +418,6 @@ class TSSHSession(Session):
             raise NotImplemented('TODO: does Twisted conch support proxycommand?')
         else:
             try:
-                host_keys = self._host_keys if hostkey_verify else None
-
                 if key_filename is None:
                     key_filenames = []
                 elif isinstance(key_filename, (str, bytes)):
@@ -430,13 +429,21 @@ class TSSHSession(Session):
 
                 self._options['host'] = host
                 self._options['port'] = port
-                self._auth = SSHUserAuthClient(username, self._options, self._connection)
+                self._options['user'] = username
+                self._options['password'] = password
+                self._options['hostkey_verify'] = hostkey_verify
+                self._options['look_for_keys'] = look_for_keys
+                self._options['known-hosts'] = self._host_keys
+
+                self._auth = NetconfUserAuthClient(username, self._options, self._connection)
+                # self._auth = SSHUserAuthClient(username, self._options, self._connection)
 
                 # Set up listener in case response comes in before post_connect can be called
                 self.pre_connect(timeout)
 
                 # Attempt to connect now
-                connect(host, port, self._options, verifyHostKey, self._auth)
+                d = connect(host, port, self._options, verify_host_key, self._auth)
+                d.addErrback(self._connect_failed)
 
                 # Add callback to set connected to true
                 self._connection.netconf_deferred.addCallbacks(self._connect_success,

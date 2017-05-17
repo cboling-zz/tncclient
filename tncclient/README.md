@@ -24,6 +24,9 @@ for any caveats or work-to-be-done.
 Here is a list of some outstanding questions and TODO items that will need to be looked
 into before we are ready for others for upstreaming. As TODO or Outstanding Questions
 are completed, they will be moved to the Completed Question list below.
+ - When connecting to a host, we need to accept the host key. How is this best done in
+   twisted with respect to connecting to our OLT.  You can do a manual SSH connection and
+   accept it then, but that is not good in the field.
  - ncclient supports a context manager (with keyword) for the Manager and Lock objects.
    How is this best supported in the twisted architecture:   
  - RPCListener, need to look into how it is used in both sync/async mode.  Is it only related

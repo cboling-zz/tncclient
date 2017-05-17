@@ -133,7 +133,6 @@ class Main(object):
         #     self.output_results(xml, text='ID Information follows:')
         #     print('  ID id: {}'.format(ident))
 
-
     def start(self):
         if self.sync_mode == SyncMode.ASYNCHRONOUS_TWISTED:
             reactor.callLater(0, self.do_work)
