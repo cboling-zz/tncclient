@@ -27,7 +27,8 @@ from tncclient.capabilities import Capabilities
 from tncclient.transport.errors import TransportError, SessionError
 from tncclient.transport.notify import Notification
 
-logger = logging.getLogger('ncclient.transport.session')
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger('tncclient.transport.session')
 
 
 class Session(Thread):

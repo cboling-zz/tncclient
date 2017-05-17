@@ -28,7 +28,8 @@ import logging
 
 from tncclient.xml_ import *
 
-logger = logging.getLogger('ncclient.manager')
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger('tncclient.manager')
 
 OPERATIONS = {
     "get": operations.Get,
@@ -77,7 +78,8 @@ def make_device_handler(device_params):
     # in a module called "ncclient.devices.<devicename>" and in a class named
     # "<devicename>DeviceHandler", with the first letter capitalized.
     class_name          = "%sDeviceHandler" % device_name.capitalize()
-    devices_module_name = "ncclient.devices.%s" % device_name
+    # TODO: Change back to "ncclient" once we are ready to push upstream
+    devices_module_name = "tncclient.devices.%s" % device_name
     dev_module_obj      = __import__(devices_module_name)
     handler_module_obj  = getattr(getattr(dev_module_obj, "devices"), device_name)
     class_obj           = getattr(handler_module_obj, class_name)
@@ -135,7 +137,8 @@ def connect_ioproc(*args, **kwds):
     if "device_params" in kwds:
         device_params = kwds["device_params"]
         del kwds["device_params"]
-        import_string = 'ncclient.transport.third_party.'
+        # TODO: Change back to "ncclient" once we are ready to push upstream
+        import_string = 'tncclient.transport.third_party.'
         import_string += device_params['name'] + '.ioproc'
         third_party_import = __import__(import_string, fromlist=['IOProc'])
     else:

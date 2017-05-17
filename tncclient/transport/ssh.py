@@ -30,7 +30,9 @@ from tncclient.transport.session import Session
 from tncclient.xml_ import *
 
 import logging
-logger = logging.getLogger("ncclient.transport.ssh")
+
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger("tncclient.transport.ssh")
 
 BUF_SIZE = 4096
 # v1.0: RFC 4742

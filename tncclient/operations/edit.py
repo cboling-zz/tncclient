@@ -20,7 +20,8 @@ from tncclient.operations import util
 
 import logging
 
-logger = logging.getLogger("ncclient.operations.edit")
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger("tncclient.operations.edit")
 
 "Operations related to changing device configuration"
 

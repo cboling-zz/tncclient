@@ -22,7 +22,8 @@ from tncclient.transport import SessionListener
 from tncclient.operations.errors import OperationError, TimeoutExpiredError, MissingCapabilityError
 
 import logging
-logger = logging.getLogger("ncclient.operations.rpc")
+# TODO: Change back to "ncclient" once we are ready to push upstream
+logger = logging.getLogger("tncclient.operations.rpc")
 
 
 class RPCError(OperationError):
